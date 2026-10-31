@@ -1,0 +1,25 @@
+{
+  "name": "whatsapp-mini-bot-v1",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "@hapi/boom": "latest",
+    "@distube/ytdl-core": "^4.16.12",
+    "pino": "latest",
+    "mongoose": "latest",
+    "dotenv": "latest",
+    "sharp": "latest",
+    "ytmusic-api": "latest",
+    "yt-search": "latest",
+    "axios": "latest",
+"sharp": "latest",
+"jsqr": "latest",
+"bwip-js": "latest",
+"rss-parser": "latest"
+  }
+}
