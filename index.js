@@ -781,6 +781,55 @@ async function getAllPluginStates() {
 PLUGIN ENABLE CHECK
 ===================================================== */
 
+
+// =====================================================
+// SHAN DASHBOARD PREMIUM PLUGIN ACCESS
+// =====================================================
+const PREMIUM_PLUGIN_IDS = {
+  cartoon: "cartoon",
+  ai: "ai",
+  vip: "vip",
+  wimg: "wimg"
+};
+
+const PREMIUM_ACCESS_REQUIRED = new Set(Object.keys(PREMIUM_PLUGIN_IDS));
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "").replace(/^0+/, "");
+}
+
+async function hasPremiumPlugin(phone, pluginId) {
+  if (!mongoConnected || !phone || !pluginId) return false;
+
+  try {
+    const number = normalizePhone(phone);
+    if (!number) return false;
+
+    const users = mongoose.connection.collection("users");
+    const records = await users.find({
+      $or: [
+        { phone: number },
+        { whatsapp: number },
+        { number: number },
+        { jid: { $regex: number } },
+        { phone: { $regex: number } },
+        { whatsapp: { $regex: number } }
+      ]
+    }).toArray();
+
+    return records.some(user => {
+      const purchased = Array.isArray(user.mine) ? user.mine : [];
+      return purchased.some(item => {
+        const id = typeof item === "string" ? item : item?.id;
+        return String(id || "").toLowerCase() === pluginId;
+      });
+    });
+  } catch (error) {
+    console.error("Premium access error:", error.message);
+    return false;
+  }
+}
+
 async function isPluginEnabled(command) {
   const name = String(command || "").trim().toLowerCase();
 
@@ -1292,6 +1341,22 @@ async function executePlugin(sock, msg, command, args, settings) {
   const lang = await langOf(msg);
   const sender = getSenderNumber(msg);
   const owner = isOwner(msg);
+
+  const premiumId = PREMIUM_ACCESS_REQUIRED.has(commandName) ? PREMIUM_PLUGIN_IDS[commandName] : null;
+  if (premiumId && !owner) {
+    const allowed = await hasPremiumPlugin(sender, premiumId);
+    if (!allowed) {
+      await sock.sendMessage(
+        msg.key.remoteJid,
+        {
+          text: "🔒 This is a Premium plugin.\n\nPurchase it from the SHAN Dashboard to activate it for your WhatsApp number."
+        },
+        { quoted: msg }
+      );
+      return true;
+    }
+  }
+
   const admin =
     !owner &&
     (typeof globalThis.SHAN_IS_ADMIN === "function"
