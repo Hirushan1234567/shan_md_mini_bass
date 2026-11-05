@@ -89,9 +89,11 @@ async function pair(req, res, number) {
 
   try {
     const latest = await fetchLatestWaWebVersion();
+    if (finished) return;
     const version = latest?.version;
     if (!Array.isArray(version) || version.length !== 3) throw new Error("WhatsApp version unavailable");
     const { state, saveCreds } = await useMultiFileAuthState(dir);
+    if (finished) return;
     sock = makeWASocket({
       version, auth: state, logger, printQRInTerminal: false,
       markOnlineOnConnect: false, syncFullHistory: false,
