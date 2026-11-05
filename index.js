@@ -1868,6 +1868,145 @@ globalThis.SHAN_GET_SENDER = getSenderNumber;
 globalThis.SHAN_CLEAN_NUMBER = cleanNumber;
 globalThis.SHAN_GET_SETTINGS = getSettings;
 
+
+/* =====================================================
+PAIR SITE SUB-BOT SESSION MANAGER
+Each linked number runs in its own auth directory and socket.
+===================================================== */
+
+const pairedSockets = new Map();
+const pairedStarting = new Set();
+const pairedTimers = new Map();
+const pairedRoot = process.env.PAIRED_SESSIONS_DIR || "./paired_sessions";
+
+function pairedCollection() {
+  return mongoose.connection.collection(PAIR_COL);
+}
+
+function savePairedFiles(number, dir) {
+  const files = [];
+  let total = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (!fs.statSync(full).isFile()) continue;
+    const data = fs.readFileSync(full, "utf8");
+    total += Buffer.byteLength(data);
+    if (total > 12 * 1024 * 1024) throw new Error("Paired session exceeds size limit");
+    files.push({ name, data });
+  }
+  return pairedCollection().updateOne(
+    { _id: number },
+    { $set: { files, updatedAt: new Date() } }
+  );
+}
+
+async function startPairedSession(number, suppliedDoc = null) {
+  const n = cleanNumber(number);
+  if (!n || n === mainPairNumber() || pairedSockets.has(n) || pairedStarting.has(n) || !mongoConnected) return;
+  pairedStarting.add(n);
+  let sock = null;
+  try {
+    const doc = suppliedDoc || await pairedCollection().findOne({ _id: n });
+    if (!doc || doc.status !== "ready" || !Array.isArray(doc.files) || !doc.files.length) return;
+
+    fs.mkdirSync(pairedRoot, { recursive: true });
+    const dir = path.join(pairedRoot, n);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const file of doc.files) {
+      const name = path.basename(String(file?.name || ""));
+      if (name && typeof file?.data === "string") fs.writeFileSync(path.join(dir, name), file.data);
+    }
+
+    const { state, saveCreds } = await useMultiFileAuthState(dir);
+    if (!state.creds.registered) throw new Error("Saved WhatsApp session is not registered");
+    const latest = await fetchLatestWaWebVersion();
+    const version = latest?.version;
+    if (!Array.isArray(version) || version.length !== 3) throw new Error("WhatsApp Web version unavailable");
+
+    sock = makeWASocket({
+      version, auth: state, logger, printQRInTerminal: false,
+      markOnlineOnConnect: false, getMessage: globalThis.SHAN_GET_MESSAGE,
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: msg => msg?.syncType !== baileys.proto?.HistorySync?.HistorySyncType?.FULL,
+      connectTimeoutMs: 60000, defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 30000, generateHighQualityLinkPreview: false,
+      browser: ["Ubuntu", "Chrome", "20.0.04"]
+    });
+
+    pairedSockets.set(n, sock);
+    globalThis.SHAN_ATTACH_SOCKET?.(sock, { subNumber: n });
+
+    sock.ev.on("creds.update", async () => {
+      try { await saveCreds(); await savePairedFiles(n, dir); }
+      catch (e) { console.error(`[PAIR ${n}] Credential save failed:`, e?.message || e); }
+    });
+
+    sock.ev.on("connection.update", async update => {
+      if (pairedSockets.get(n) !== sock) return;
+      if (update.connection === "open") {
+        try {
+          await saveCreds();
+          await savePairedFiles(n, dir);
+          await pairedCollection().updateOne(
+            { _id: n },
+            { $set: { status: "ready", active: true, activeAt: new Date(), updatedAt: new Date() } }
+          );
+          console.log(`🟢 [PAIR ${n}] Sub-bot online.`);
+          const settings = await getSettings();
+          setTimeout(() => sendWelcomeMessage(sock, n, settings.prefix || DEFAULT_PREFIX).catch(() => {}), 3000);
+        } catch (e) {
+          console.error(`[PAIR ${n}] Online-state save failed:`, e?.message || e);
+        }
+      }
+      if (update.connection === "close") {
+        const code = getDisconnectCode(update.lastDisconnect);
+        pairedSockets.delete(n);
+        if (code === DisconnectReason.loggedOut) {
+          await pairedCollection().updateOne({ _id: n }, { $set: { status: "removed", active: false, updatedAt: new Date() } }).catch(() => {});
+          fs.rmSync(dir, { recursive: true, force: true });
+          console.log(`🔴 [PAIR ${n}] Logged out; session removed.`);
+          return;
+        }
+        if (!pairedTimers.has(n)) {
+          const timer = setTimeout(() => {
+            pairedTimers.delete(n);
+            startPairedSession(n).catch(e => console.error(`[PAIR ${n}] Restart failed:`, e?.message || e));
+          }, 5000);
+          pairedTimers.set(n, timer);
+        }
+      }
+    });
+  } catch (e) {
+    console.error(`[PAIR ${n}] Start failed:`, e?.stack || e?.message || e);
+    try { sock?.end?.(undefined); } catch {}
+    if (sock && pairedSockets.get(n) === sock) pairedSockets.delete(n);
+  } finally {
+    pairedStarting.delete(n);
+  }
+}
+
+async function startSavedPairedSessions() {
+  if (!mongoConnected) return;
+  try {
+    const rows = await pairedCollection().find({ status: "ready" }).toArray();
+    for (const row of rows) {
+      const n = cleanNumber(row?._id);
+      if (n && n !== mainPairNumber()) {
+        await startPairedSession(n, row);
+      }
+    }
+    console.log(`🔗 Pair site sessions checked: ${rows.length}`);
+  } catch (e) {
+    console.error("Pair site session scan failed:", e?.message || e);
+  }
+  setInterval(() => {
+    if (!mongoConnected) return;
+    pairedCollection().find({ status: "ready" }).toArray()
+      .then(rows => rows.forEach(row => startPairedSession(row._id, row)))
+      .catch(e => console.error("Pair session refresh failed:", e?.message || e));
+  }, 15000).unref?.();
+}
+
 /* =====================================================
 WEB PAIR — main number එකත් pair site එකෙන් pair කරන්න
 Railway pair server එක MongoDB (pair_sessions) එකට save කරන
@@ -2646,6 +2785,7 @@ async function main() {
   await expirePremiumUsers();
   await loadPlugins();
   await startBot();
+  await startSavedPairedSessions();
 }
 
 /* =====================================================
