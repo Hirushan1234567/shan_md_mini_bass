@@ -71,7 +71,6 @@ async function pair(req, res, number) {
   let sock;
   let finished = false;
   let registered = false;
-  let codeSent = false;
   let aborted = false;
   const finish = async (error) => {
     if (finished) return;
@@ -84,7 +83,7 @@ async function pair(req, res, number) {
     if (!res.writableEnded) res.end();
   };
   const timeout = setTimeout(() => { void finish("expired"); }, 180000);
-  req.on("close", () => {
+  res.on("close", () => {
     if (!res.writableEnded) { aborted = true; void finish("aborted"); }
   });
 
@@ -135,7 +134,6 @@ async function pair(req, res, number) {
     await sleep(2500);
     if (finished || state.creds.registered) throw new Error("Pair socket is not ready for a new link");
     const code = await sock.requestPairingCode(number);
-    codeSent = true;
     send(res, { type: "code", code: code.length === 8 ? code.slice(0,4) + "-" + code.slice(4) : code, expiresIn: 180 });
   } catch (e) {
     console.error("Pair API error:", e?.stack || e?.message || e);
