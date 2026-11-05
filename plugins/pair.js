@@ -561,7 +561,14 @@ function siteBotCount() {
 }
 
 function hasCreds(number) {
-  return fs.existsSync(path.join(dirOf(number), "creds.json"));
+  try {
+    const creds = JSON.parse(
+      fs.readFileSync(path.join(dirOf(number), "creds.json"), "utf8")
+    );
+    return creds?.registered === true;
+  } catch {
+    return false;
+  }
 }
 
 let siteSyncRunning = false;
@@ -616,6 +623,8 @@ async function syncFromSite() {
       }
 
       try {
+        // Never trust a partial local directory. Rehydrate from MongoDB unless
+        // the local Baileys credentials are actually registered.
         if (!hasCreds(number)) {
           const full = await col.findOne({ _id: number });
           const files = Array.isArray(full?.files) ? full.files : [];
@@ -636,20 +645,27 @@ async function syncFromSite() {
 
             fs.writeFileSync(path.join(dirOf(number), name), String(f.data ?? ""));
           }
+
+          if (!hasCreds(number)) {
+            console.error(`❌ Pair-site session has no registered credentials: ${number}`);
+            continue;
+          }
         }
 
         console.log(`🌐 Site session found, starting sub-bot: ${number}`);
 
+        await markSite(number, { claimedAt: new Date(), active: false, botStatus: "starting" });
         await launch(number, { createdBy: "site" });
-        await markSite(number, { claimedAt: new Date() });
       } catch (error) {
         console.error(
           `❌ Site sync error (${number}):`,
           error?.message || error
         );
+        // Retry this session shortly; do not wait for the 10-minute safety scan.
+        setTimeout(() => syncFromSite().catch(() => {}), 15000);
       }
 
-      await sleep(3000);
+      await sleep(1500);
     }
   } catch (error) {
     console.error("❌ Site sync failed:", error?.message || error);
@@ -766,7 +782,7 @@ setTimeout(() => {
       console.error("❌ Sub-bot restore failed:", error?.message || error);
     })
     .finally(startSiteSync);
-}, 10000);
+}, 3000);
 
 /* =====================================================
 PLUGIN
