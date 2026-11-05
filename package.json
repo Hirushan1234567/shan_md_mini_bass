@@ -4,7 +4,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "pair": "node pair-server.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.24",
@@ -17,9 +18,8 @@
     "ytmusic-api": "latest",
     "yt-search": "latest",
     "axios": "latest",
-"sharp": "latest",
-"jsqr": "latest",
-"bwip-js": "latest",
-"rss-parser": "latest"
+    "jsqr": "latest",
+    "bwip-js": "latest",
+    "rss-parser": "latest"
   }
 }
