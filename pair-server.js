@@ -72,7 +72,6 @@ async function startPair(number) {
     if (stateInfo.finished) return;
     stateInfo.finished = true;
     clearTimeout(stateInfo.timer);
-    if (reconnectTimer) clearTimeout(reconnectTimer);
     try { stateInfo.sock?.ev?.removeAllListeners?.(); stateInfo.sock?.end?.(undefined); } catch {}
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     active.delete(number);
