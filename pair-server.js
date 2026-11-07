@@ -128,7 +128,7 @@ async function pair(req, res, number) {
       if (update.connection === "close" && !registered) {
         const code = update.lastDisconnect?.error?.output?.statusCode || update.lastDisconnect?.error?.statusCode;
         if (code !== DisconnectReason.restartRequired) {
-          console.error("Pair socket closed before link:", code);
+          console.error("Pair socket closed before link:", code, update.lastDisconnect?.error?.message || "No error message", update.lastDisconnect?.error?.name || "Unknown error", update.lastDisconnect?.error?.output?.payload?.message || "No payload message");
           await finish("failed");
         }
       }
