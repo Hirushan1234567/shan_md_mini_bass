@@ -171,7 +171,7 @@ async function startPair(number) {
     connectSocket();
     await sleep(2500);
     if (stateInfo.finished || state.creds.registered) throw new Error("Pair socket is not ready for a new link");
-    const rawCode = await sock.requestPairingCode(number);
+    const rawCode = await stateInfo.sock.requestPairingCode(number);
     const pairCode = rawCode.length === 8 ? rawCode.slice(0, 4) + "-" + rawCode.slice(4) : rawCode;
     stateInfo.status = "pairing";
     stateInfo.pairCode = pairCode;
