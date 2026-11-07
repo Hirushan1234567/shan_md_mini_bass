@@ -72,6 +72,7 @@ async function startPair(number) {
     if (stateInfo.finished) return;
     stateInfo.finished = true;
     clearTimeout(stateInfo.timer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     try { stateInfo.sock?.ev?.removeAllListeners?.(); stateInfo.sock?.end?.(undefined); } catch {}
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     active.delete(number);
@@ -101,53 +102,74 @@ async function startPair(number) {
     const { state, saveCreds } = await useMultiFileAuthState(dir);
     if (state.creds.registered) throw new Error("This temporary pairing session is already registered");
 
-    const sock = makeWASocket({
-      version, auth: state, logger, printQRInTerminal: false,
-      markOnlineOnConnect: false, syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
-      connectTimeoutMs: 60000, defaultQueryTimeoutMs: 60000,
-      keepAliveIntervalMs: 30000, generateHighQualityLinkPreview: false,
-      browser: ["Ubuntu", "Chrome", "20.0.04"]
-    });
-    stateInfo.sock = sock;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
 
-    sock.ev.on("creds.update", () => { void saveCreds().catch(error => console.error("Pair creds save failed:", error?.message || error)); });
-
-    sock.ev.on("connection.update", async update => {
+    const connectSocket = () => {
       if (stateInfo.finished) return;
+      const sock = makeWASocket({
+        version, auth: state, logger, printQRInTerminal: false,
+        markOnlineOnConnect: false, syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false,
+        connectTimeoutMs: 60000, defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000, generateHighQualityLinkPreview: false,
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
+      });
+      stateInfo.sock = sock;
 
-      if (update.connection === "open" && !stateInfo.registered) {
-        stateInfo.registered = true;
-        stateInfo.status = "linking";
-        try {
-          await sleep(5000);
-          await saveCreds();
-          const files = readFiles(dir);
-          if (!files.some(file => file.name === "creds.json")) throw new Error("WhatsApp credentials were not saved");
-          await sessions.updateOne(
-            { _id: number },
-            { $set: { status: "ready", files, active: false, pairCode: null, error: null, claimedAt: null, updatedAt: new Date() },
-              $setOnInsert: { createdAt: new Date() } },
-            { upsert: true }
-          );
-          console.log("WhatsApp pair saved for number:", number);
-          await cleanup("ready");
-        } catch (error) {
-          console.error("Pair session save failed:", error?.stack || error?.message || error);
-          await cleanup("failed", error?.message || "Could not save linked session");
+      sock.ev.on("creds.update", () => {
+        void saveCreds().catch(error => console.error("Pair creds save failed:", error?.message || error));
+      });
+
+      sock.ev.on("connection.update", async update => {
+        if (stateInfo.finished || stateInfo.sock !== sock) return;
+
+        if (update.connection === "open" && !stateInfo.registered) {
+          stateInfo.registered = true;
+          stateInfo.status = "linking";
+          try {
+            await sleep(5000);
+            await saveCreds();
+            const files = readFiles(dir);
+            if (!files.some(file => file.name === "creds.json")) throw new Error("WhatsApp credentials were not saved");
+            await sessions.updateOne(
+              { _id: number },
+              { $set: { status: "ready", files, active: false, pairCode: null, error: null, claimedAt: null, updatedAt: new Date() },
+                $setOnInsert: { createdAt: new Date() } },
+              { upsert: true }
+            );
+            console.log("WhatsApp pair saved for number:", number);
+            await cleanup("ready");
+          } catch (error) {
+            console.error("Pair session save failed:", error?.stack || error?.message || error);
+            await cleanup("failed", error?.message || "Could not save linked session");
+          }
         }
-      }
 
-      if (update.connection === "close" && !stateInfo.registered) {
-        const code = update.lastDisconnect?.error?.output?.statusCode || update.lastDisconnect?.error?.statusCode;
-        if (code !== DisconnectReason.restartRequired) {
+        if (update.connection === "close" && !stateInfo.registered) {
+          const code = update.lastDisconnect?.error?.output?.statusCode || update.lastDisconnect?.error?.statusCode;
+          if (code === DisconnectReason.restartRequired) {
+            reconnectAttempts += 1;
+            if (reconnectAttempts > 5) {
+              await cleanup("failed", "WhatsApp requested too many reconnects");
+              return;
+            }
+            console.log("Pair socket restarting after WhatsApp link handshake:", number, reconnectAttempts);
+            try { sock.ev.removeAllListeners(); } catch {}
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connectSocket();
+            }, 1200);
+            return;
+          }
           const message = update.lastDisconnect?.error?.message || "WhatsApp connection closed before linking";
           console.error("Pair socket closed before link:", code, message, update.lastDisconnect?.error?.name || "Unknown error");
           await cleanup("failed", message);
         }
-      }
-    });
+      });
+    };
 
+    connectSocket();
     await sleep(2500);
     if (stateInfo.finished || state.creds.registered) throw new Error("Pair socket is not ready for a new link");
     const rawCode = await sock.requestPairingCode(number);
