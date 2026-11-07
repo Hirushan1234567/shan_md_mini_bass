@@ -16,9 +16,10 @@ const SECRET = String(process.env.PAIR_API_SECRET || "");
 const MONGO = String(process.env.MONGODB_URI || "");
 const COLLECTION = process.env.PAIR_SITE_COLLECTION || "pair_sessions";
 const logger = pino({ level: "silent" });
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const clean = n => String(n || "").replace(/\D/g, "");
-const valid = n => /^[1-9]\d{7,14}$/.test(n);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const clean = value => String(value || "").replace(/\D/g, "");
+const valid = number => /^[1-9]\d{7,14}$/.test(number);
+const active = new Map();
 
 if (!SECRET || !MONGO) {
   console.error("PAIR_API_SECRET and MONGODB_URI are required.");
@@ -29,10 +30,12 @@ await mongoose.connect(MONGO);
 const sessions = mongoose.connection.collection(COLLECTION);
 console.log("SHAN VPS Pair API connected to MongoDB.");
 
-const active = new Set();
-function send(res, value) {
-  if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(value) + "\n");
+function json(res, status, value) {
+  if (res.writableEnded || res.destroyed) return;
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(value));
 }
+
 function readFiles(dir) {
   const files = [];
   let total = 0;
@@ -47,54 +50,58 @@ function readFiles(dir) {
   return files;
 }
 
-async function pair(req, res, number) {
+async function startPair(number) {
   if (active.has(number)) {
-    res.writeHead(409, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "Pairing already in progress for this number." }));
-  }
-  const old = await sessions.findOne({ _id: number }, { projection: { status: 1, active: 1 } });
-  if (old?.status === "ready" && old?.active) {
-    res.writeHead(409, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "This number is already connected." }));
+    const current = active.get(number);
+    return { status: current.status, pairCode: current.pairCode || null, expiresIn: 180 };
   }
 
-  active.add(number);
-  res.writeHead(200, {
-    "Content-Type": "application/x-ndjson; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no"
-  });
+  const old = await sessions.findOne({ _id: number }, { projection: { status: 1, active: 1 } });
+  if (old?.status === "ready" && old?.active) {
+    const error = new Error("This number is already connected.");
+    error.statusCode = 409;
+    throw error;
+  }
 
   const dir = path.join(os.tmpdir(), "shan-pair-" + number + "-" + Date.now());
   fs.mkdirSync(dir, { recursive: true });
-  let sock;
-  let finished = false;
-  let registered = false;
-  let aborted = false;
-  const finish = async (error) => {
-    if (finished) return;
-    finished = true;
-    clearTimeout(timeout);
-    try { sock?.ev?.removeAllListeners?.(); sock?.end?.(undefined); } catch {}
+  const stateInfo = { status: "starting", pairCode: null, sock: null, dir, timer: null, registered: false, finished: false };
+  active.set(number, stateInfo);
+
+  const cleanup = async (status, errorMessage = null) => {
+    if (stateInfo.finished) return;
+    stateInfo.finished = true;
+    clearTimeout(stateInfo.timer);
+    try { stateInfo.sock?.ev?.removeAllListeners?.(); stateInfo.sock?.end?.(undefined); } catch {}
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     active.delete(number);
-    if (error && !aborted) send(res, { type: "error", reason: error === "expired" ? "expired" : "failed" });
-    if (!res.writableEnded) res.end();
+    if (status === "failed" || status === "expired") {
+      await sessions.updateOne(
+        { _id: number },
+        { $set: { status, active: false, pairCode: null, error: errorMessage || status, updatedAt: new Date() } },
+        { upsert: true }
+      ).catch(() => {});
+    }
   };
-  const timeout = setTimeout(() => { void finish("expired"); }, 180000);
-  res.on("close", () => {
-    if (!res.writableEnded) { aborted = true; void finish("aborted"); }
-  });
+
+  stateInfo.timer = setTimeout(() => { void cleanup("expired", "Pairing code expired"); }, 180000);
 
   try {
+    await sessions.updateOne(
+      { _id: number },
+      { $set: { status: "pairing", active: false, pairCode: null, error: null, updatedAt: new Date() },
+        $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+
     const latest = await fetchLatestWaWebVersion();
-    if (finished) return;
     const version = latest?.version;
     if (!Array.isArray(version) || version.length !== 3) throw new Error("WhatsApp version unavailable");
+
     const { state, saveCreds } = await useMultiFileAuthState(dir);
-    if (finished) return;
-    sock = makeWASocket({
+    if (state.creds.registered) throw new Error("This temporary pairing session is already registered");
+
+    const sock = makeWASocket({
       version, auth: state, logger, printQRInTerminal: false,
       markOnlineOnConnect: false, syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
@@ -102,83 +109,125 @@ async function pair(req, res, number) {
       keepAliveIntervalMs: 30000, generateHighQualityLinkPreview: false,
       browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
-    sock.ev.on("creds.update", () => { void saveCreds().catch(() => {}); });
+    stateInfo.sock = sock;
+
+    sock.ev.on("creds.update", () => { void saveCreds().catch(error => console.error("Pair creds save failed:", error?.message || error)); });
+
     sock.ev.on("connection.update", async update => {
-      if (finished) return;
-      if (update.connection === "open") {
-        registered = true;
-        send(res, { type: "status", status: "linking" });
+      if (stateInfo.finished) return;
+
+      if (update.connection === "open" && !stateInfo.registered) {
+        stateInfo.registered = true;
+        stateInfo.status = "linking";
         try {
-          await sleep(6000);
+          await sleep(5000);
           await saveCreds();
           const files = readFiles(dir);
+          if (!files.some(file => file.name === "creds.json")) throw new Error("WhatsApp credentials were not saved");
           await sessions.updateOne(
             { _id: number },
-            { $set: { status: "ready", files, active: false, claimedAt: null, updatedAt: new Date() },
+            { $set: { status: "ready", files, active: false, pairCode: null, error: null, claimedAt: null, updatedAt: new Date() },
               $setOnInsert: { createdAt: new Date() } },
             { upsert: true }
           );
-          send(res, { type: "status", status: "linked" });
-          await finish();
-        } catch (e) {
-          console.error("Pair session save failed:", e?.message || e);
-          await finish("failed");
+          console.log("WhatsApp pair saved for number:", number);
+          await cleanup("ready");
+        } catch (error) {
+          console.error("Pair session save failed:", error?.stack || error?.message || error);
+          await cleanup("failed", error?.message || "Could not save linked session");
         }
       }
-      if (update.connection === "close" && !registered) {
+
+      if (update.connection === "close" && !stateInfo.registered) {
         const code = update.lastDisconnect?.error?.output?.statusCode || update.lastDisconnect?.error?.statusCode;
         if (code !== DisconnectReason.restartRequired) {
-          console.error("Pair socket closed before link:", code, update.lastDisconnect?.error?.message || "No error message", update.lastDisconnect?.error?.name || "Unknown error", update.lastDisconnect?.error?.output?.payload?.message || "No payload message");
-          await finish("failed");
+          const message = update.lastDisconnect?.error?.message || "WhatsApp connection closed before linking";
+          console.error("Pair socket closed before link:", code, message, update.lastDisconnect?.error?.name || "Unknown error");
+          await cleanup("failed", message);
         }
       }
     });
+
     await sleep(2500);
-    if (finished || state.creds.registered) throw new Error("Pair socket is not ready for a new link");
-    const code = await sock.requestPairingCode(number);
-    send(res, { type: "code", code: code.length === 8 ? code.slice(0,4) + "-" + code.slice(4) : code, expiresIn: 180 });
-  } catch (e) {
-    console.error("Pair API error:", e?.stack || e?.message || e);
-    await finish("failed");
+    if (stateInfo.finished || state.creds.registered) throw new Error("Pair socket is not ready for a new link");
+    const rawCode = await sock.requestPairingCode(number);
+    const pairCode = rawCode.length === 8 ? rawCode.slice(0, 4) + "-" + rawCode.slice(4) : rawCode;
+    stateInfo.status = "pairing";
+    stateInfo.pairCode = pairCode;
+    await sessions.updateOne(
+      { _id: number },
+      { $set: { status: "pairing", pairCode, codeExpiresAt: new Date(Date.now() + 180000), updatedAt: new Date() } },
+      { upsert: true }
+    );
+    return { status: "pairing", pairCode, expiresIn: 180 };
+  } catch (error) {
+    console.error("Pair API error:", error?.stack || error?.message || error);
+    await cleanup("failed", error?.message || "Pair request failed");
+    throw error;
   }
+}
+
+async function readBody(req) {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 4096) throw new Error("Request body too large");
+  }
+  return JSON.parse(raw || "{}");
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (req.method === "GET" && url.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "SHAN VPS Pair API" }));
+    return json(res, 200, { ok: true, service: "SHAN VPS Pair API" });
   }
-  if (req.method !== "POST" || url.pathname !== "/api/pair") {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "Not found" }));
-  }
+
   if (req.headers["x-pair-secret"] !== SECRET) {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "Unauthorized" }));
+    return json(res, 401, { error: "Unauthorized" });
   }
-  let body = "";
-  req.on("data", chunk => { body += chunk; if (body.length > 4096) req.destroy(); });
-  req.on("end", async () => {
-    try {
-      const number = clean(JSON.parse(body || "{}").number);
-      if (!valid(number)) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify({ error: "Invalid WhatsApp number." }));
-      }
-      await pair(req, res, number);
-    } catch (e) {
-      if (!res.headersSent) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid request." }));
-      }
+
+  try {
+    if (req.method === "POST" && url.pathname === "/api/pair") {
+      const number = clean((await readBody(req)).number);
+      if (!valid(number)) return json(res, 400, { error: "Invalid WhatsApp number." });
+      const result = await startPair(number);
+      return json(res, 200, { success: true, number, ...result });
     }
-  });
+
+    const match = url.pathname.match(/^\/api\/pair\/([1-9]\d{7,14})$/);
+    if (req.method === "GET" && match) {
+      const number = match[1];
+      const live = active.get(number);
+      if (live) {
+        return json(res, 200, {
+          success: true, number, status: live.status,
+          pairCode: live.pairCode && live.status === "pairing" ? live.pairCode : null
+        });
+      }
+      const saved = await sessions.findOne({ _id: number }, { projection: { status: 1, active: 1, pairCode: 1, codeExpiresAt: 1, error: 1, updatedAt: 1 } });
+      if (!saved) return json(res, 404, { error: "Pairing session not found" });
+      const codeValid = saved.codeExpiresAt && new Date(saved.codeExpiresAt).getTime() > Date.now();
+      return json(res, 200, {
+        success: true, number, status: saved.status || "pending",
+        pairCode: codeValid ? saved.pairCode || null : null,
+        active: saved.active === true, error: saved.error || null
+      });
+    }
+
+    return json(res, 404, { error: "Not found" });
+  } catch (error) {
+    return json(res, error.statusCode || 500, { error: error.message || "Pair API error" });
+  }
 });
 
 server.listen(PORT, "127.0.0.1", () => console.log("SHAN VPS Pair API listening on 127.0.0.1:" + PORT));
 async function shutdown() {
   server.close();
+  for (const [number, state] of active) {
+    clearTimeout(state.timer);
+    try { state.sock?.end?.(undefined); } catch {}
+    try { fs.rmSync(state.dir, { recursive: true, force: true }); } catch {}
+  }
   try { await mongoose.disconnect(); } catch {}
   process.exit(0);
 }
