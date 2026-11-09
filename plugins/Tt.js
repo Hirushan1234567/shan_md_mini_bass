@@ -1,109 +1,151 @@
-// plugins/tiktok.js
-// SHAN MINI BOT V1 — TikTok downloader (quality + Video / Document)
-//
-//   .tt <TikTok link>  → card → reply a number (1 = HD, 2 = SD, 3 = MP3 ...)
-//                              → then 1 = Video, 2 = Document   (or reply "2d" to skip the 2nd step)
-//
-// Needs: dlcore.js in the main bot folder (next to index.js and lang.js).
-// Source: tikwm.com (no watermark), fallback yt-dlp.
-// To make it Premium-only: .premiumco tiktok
+// SHAN MINI BOT — TikTok API handoff plugin
+// Commands: .tt <TikTok URL> | .tt document <URL> | .tt audio <URL>
+// API returns a provider handoff URL (not a media file), so this plugin
+// sends the verified handoff link and the API's instructions to the chat.
 
-// dlcore.js root folder එකේ (index.js ළඟ) හෝ plugins/ ඇතුළේ — දෙකෙන් එකක තිබුණත් වැඩ කරනවා
-const {
-  createDownloader,
-  downloadToFile,
-  firstUrl,
-  ytdlpInfo,
-  ytdlpOptions,
-  UA
-} = await import("../dlcore.js").catch(() => import("./dlcore.js"));
+const API_BASE = String(
+  process.env.SHAN_MINI_API_URL || "http://127.0.0.1:3036"
+).replace(/\/+$/, "");
 
-const TT_URL = /https?:\/\/(?:[a-z0-9-]+\.)?tiktok\.com\/\S+/i;
-const ORIGIN = "https://www.tikwm.com";
+const API_KEY = String(process.env.SHAN_MINI_API_KEY || "").trim();
 
-const abs = u => (!u ? "" : /^https?:\/\//i.test(u) ? u : `${ORIGIN}${u.startsWith("/") ? "" : "/"}${u}`);
+const API_ENDPOINT = API_BASE.endsWith("/api/v1/tt/convert")
+  ? API_BASE
+  : `${API_BASE}/api/v1/tt/convert`;
 
-async function tikwm(url) {
-  const res = await fetch(`${ORIGIN}/api/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
-    body: new URLSearchParams({ url, hd: "1" }),
-    signal: AbortSignal.timeout(30000)
-  });
+const TIKTOK_URL = /https?:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\/\S+/i;
 
-  const json = await res.json().catch(() => null);
-
-  if (!json || json.code !== 0 || !json.data) {
-    throw new Error(json?.msg || "TikTok service unavailable");
-  }
-
-  const d = json.data;
-  const options = [];
-
-  if (Array.isArray(d.images) && d.images.length) {
-    options.push({
-      kind: "images",
-      label: "",
-      size: 0,
-      get: async () => ({ images: d.images.map(abs) })
-    });
-  } else {
-    const hd = abs(d.hdplay);
-    const sd = abs(d.play);
-
-    if (hd && hd !== sd) {
-      options.push({ kind: "video", label: "HD", size: Number(d.hd_size) || 0, get: () => downloadToFile(hd) });
-    }
-
-    if (sd) {
-      options.push({
-        kind: "video",
-        label: hd && hd !== sd ? "SD" : "Video",
-        size: Number(d.size) || 0,
-        get: () => downloadToFile(sd)
-      });
-    }
-  }
-
-  if (d.music) {
-    options.push({ kind: "audio", label: "MP3", size: 0, get: () => downloadToFile(abs(d.music)) });
-  }
-
-  if (!options.length) throw new Error("Nothing to download");
-
-  return {
-    title: d.title || "TikTok",
-    author: d.author?.nickname || d.author?.unique_id || "",
-    duration: Number(d.duration) || 0,
-    thumbnail: abs(d.cover || d.origin_cover),
-    options
-  };
+function firstUrl(value = "") {
+  return String(value).match(/https?:\/\/[^\s<>"']+/i)?.[0] || "";
 }
 
-export default createDownloader({
-  title: "TIKTOK",
-  icon: "🎵",
-  example: "https://vt.tiktok.com/ZSxxxxxx/",
-  commands: ["tiktok", "tt", "ttdl", "tiktokdl"],
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.toString()
+      : "";
+  } catch {
+    return "";
+  }
+}
 
-  match: text => {
-    const url = firstUrl(text);
-    return url && TT_URL.test(url) ? url : null;
-  },
+function cleanText(value, fallback = "") {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : fallback;
+}
 
-  async resolve(url) {
+export default {
+  command: "tt",
+  commands: ["tt", "tiktok", "ttdl", "tiktokdl"],
+  alias: ["tiktok", "ttdl", "tiktokdl"],
+  category: "download",
+  description: "TikTok video / audio link",
+
+  async execute(sock, msg, args = [], commandName = "tt") {
+    const chat = msg?.key?.remoteJid;
+    if (!chat) return;
+
+    const reply = text =>
+      sock.sendMessage(chat, { text }, { quoted: msg });
+
+    const values = Array.isArray(args) ? [...args] : String(args || "").split(/\s+/);
+    let format = "video";
+
+    if (["video", "document", "doc", "audio", "mp3"].includes(
+      String(values[0] || "").toLowerCase()
+    )) {
+      const selected = String(values.shift()).toLowerCase();
+      format = selected === "doc" ? "document" : selected === "mp3" ? "audio" : selected;
+    }
+
+    const input = values.join(" ").trim();
+    const url = firstUrl(input);
+
+    if (!url || !TIKTOK_URL.test(url)) {
+      return reply(
+        "🎵 *SHAN TIKTOK DOWNLOADER*\n\n" +
+        "Usage:\n" +
+        ".tt <TikTok URL>\n" +
+        ".tt document <TikTok URL>\n" +
+        ".tt audio <TikTok URL>"
+      );
+    }
+
+    if (!API_KEY) {
+      return reply(
+        "❌ TikTok API key is not configured.\n" +
+        "Add SHAN_MINI_API_KEY to the bot's private .env file."
+      );
+    }
+
     try {
-      return await tikwm(url);
-    } catch (error) {
-      console.error("[DL:TIKTOK] tikwm failed, trying yt-dlp:", error?.message || error);
+      await sock.sendMessage(chat, { react: { text: "⏳", key: msg.key } });
+
+      const endpoint = new URL(API_ENDPOINT);
+      endpoint.searchParams.set("format", format);
+      endpoint.searchParams.set("url", url);
+      endpoint.searchParams.set("api_key", API_KEY);
+
+      const response = await fetch(endpoint, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data || data.status !== true) {
+        const reason = cleanText(
+          data?.detail || data?.message || data?.error,
+          `API request failed (HTTP ${response.status})`
+        );
+        throw new Error(reason);
+      }
+
+      const providerUrl = safeHttpUrl(data.provider_url);
+
+      if (!providerUrl) {
+        throw new Error("The API did not return a valid provider link.");
+      }
+
+      const provider = cleanText(data.provider, "TikTok provider");
+      const instruction = cleanText(
+        data.instruction,
+        "Open the provider link and follow its instructions."
+      );
+      const delivery = cleanText(data.delivery, format);
+
+      const text =
+        "╭━━〔 🎵 SHAN TIKTOK 〕━━╮\n\n" +
+        `📦 Format: ${cleanText(data.format, format.toUpperCase())}\n` +
+        `🔗 Provider: ${provider}\n` +
+        `📤 Delivery: ${delivery}\n\n` +
+        "🔗 *Continue here:*\n" +
+        providerUrl +
+        "\n\n" +
+        instruction +
+        "\n\n" +
+        "ℹ️ The current API returns a provider link, not the video file itself.\n" +
+        "╰━━━━━━━━━━━━━━━━━━━━╯";
+
+      await reply(text);
 
       try {
-        const info = await ytdlpInfo(url);
-        return { ...info, options: ytdlpOptions(url, info) };
-      } catch (fallback) {
-        // yt-dlp ස්ථාපනය කරන්න බැරි නම් මුල් error එකම පෙන්වනවා
-        throw fallback?.code === "NO_YTDLP" ? error : fallback;
-      }
+        await sock.sendMessage(chat, { react: { text: "✅", key: msg.key } });
+      } catch {}
+    } catch (error) {
+      console.error("[SHAN:TIKTOK] API error:", error?.stack || error?.message || error);
+
+      try {
+        await sock.sendMessage(chat, { react: { text: "❌", key: msg.key } });
+      } catch {}
+
+      return reply(
+        "❌ *TikTok request failed*\n\n" +
+        cleanText(error?.message, "Please try again later.")
+      );
     }
   }
-});
+};
