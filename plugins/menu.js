@@ -505,12 +505,12 @@ async function sendMenu(sock, msg, text) {
       const sections = [{
         title: "📚 Select a category",
         rows: [
-          ...CATEGORIES.map(category => ({
+          ...CATEGORIES.slice(0, 9).map(category => ({
             title: `${category.icon} ${category.name}`,
             rowId: `shan_category_${category.id}`,
             description: category.description
           })),
-          { title: "📋 All commands", rowId: "shan_category_all", description: "Show every command" }
+          { title: "➡️ More categories", rowId: "shan_category_more", description: "Premium and Admin categories" }
         ]
       }];
       sent = await sock.sendMessage(
@@ -569,6 +569,24 @@ async function handleReply(sock, msg, text) {
   const input = String(text || "")
     .trim()
     .toLowerCase();
+
+  if (input === "shan_category_more") {
+    const jid = msg.key?.remoteJid || msg.remoteJid;
+    const rows = CATEGORIES.slice(9).map(category => ({
+      title: `${category.icon} ${category.name}`,
+      rowId: `shan_category_${category.id}`,
+      description: category.description
+    }));
+    rows.push({ title: "📋 All commands", rowId: "shan_category_all", description: "Show every command" });
+    await sock.sendMessage(jid, {
+      text: "💠 SHAN MINI BOT — More categories",
+      title: "More categories",
+      footer: "💠 Blue Neon Edition",
+      buttonText: "⚡ Select category",
+      sections: [{ title: "📚 Select a category", rows }]
+    }, { quoted: msg });
+    return true;
+  }
 
   if (input.startsWith("shan_category_")) {
     const selected = input.slice("shan_category_".length);
