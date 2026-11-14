@@ -1910,10 +1910,10 @@ function setupMessages(sock, ctx = {}) {
               jid,
               {
                 text:
-                  "╭━━〔 🔘 BUTTON MODE 〕━━╮\\n\\n" +
-                  "ON  : .button on  /  .bon\\n" +
-                  "OFF : .button off /  .boff\\n\\n" +
-                  "╰━━━━━━━━━━━━━━━━━━━━╯\\n\\nSHAN_BUTTON_MODE_CONTROL"
+                  "╭━━〔 🔘 BUTTON MODE 〕━━╮\n\n" +
+                  "ON  : .button on  /  .bon\n" +
+                  "OFF : .button off /  .boff\n\n" +
+                  "╰━━━━━━━━━━━━━━━━━━━━╯\n\nSHAN_BUTTON_MODE_CONTROL"
               },
               { quoted: msg }
             );
@@ -1939,12 +1939,12 @@ function setupMessages(sock, ctx = {}) {
             jid,
             {
               text:
-                `╭━━〔 🔘 BUTTON MODE 〕━━╮\\n\\n` +
-                `✅ Button Mode: ${enabled ? "ON" : "OFF"}\\n\\n` +
+                `╭━━〔 🔘 BUTTON MODE 〕━━╮\n\n` +
+                `✅ Button Mode: ${enabled ? "ON" : "OFF"}\n\n` +
                 (enabled
                   ? "📋 List Menu / All Menu සහ plugin text replies සඳහා buttons සක්‍රියයි."
                   : "📝 සාමාන්‍ය text mode එක සක්‍රියයි.") +
-                "\\n\\nSHAN_BUTTON_MODE_CONTROL"
+                "\n\nSHAN_BUTTON_MODE_CONTROL"
             },
             { quoted: msg }
           );
