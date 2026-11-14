@@ -84,39 +84,36 @@ function installFooter(sock, subNumber = null) {
         }
       }
 
-      // Optional per-bot WhatsApp button mode (plain text plugin replies only).
+      // Per-bot quick-reply buttons for text and caption replies.
+      // Preserve the original payload (image, video, document, caption, etc.).
       const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
+      const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+      const hasReplyText =
+        typeof content?.text === "string" ||
+        typeof content?.caption === "string";
+
       if (
-        content &&
-        typeof content === "object" &&
-        typeof content.text === "string" &&
+        enabled &&
+        hasReplyText &&
         !content.buttons &&
+        !content.templateButtons &&
         !content.sections &&
         !content.listMessage &&
-        !content.templateButtons &&
         !content.interactiveMessage &&
         !content.edit &&
         !content.react &&
         !content.delete &&
         !content.forward
       ) {
-        const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
-        if (enabled) {
-          content = {
-            text: content.text,
-            footer: "SHAN MINI BOT",
-            title: "SHAN MINI BOT",
-            buttonText: "⚡ Select",
-            sections: [{
-              title: "⚡ Quick Actions",
-              rows: [
-                { title: "📋 Menu", rowId: "shan_btn_menu", description: "Open bot menu" },
-                { title: "🏓 Ping", rowId: "shan_btn_ping", description: "Check bot response" },
-                { title: "👑 Owner", rowId: "shan_btn_owner", description: "Owner contact" }
-              ]
-            }]
-          };
-        }
+        content = {
+          ...content,
+          buttons: [
+            { buttonId: "shan_btn_menu", buttonText: { displayText: "📋 Menu" }, type: 1 },
+            { buttonId: "shan_btn_ping", buttonText: { displayText: "🏓 Ping" }, type: 1 },
+            { buttonId: "shan_btn_owner", buttonText: { displayText: "👑 Owner" }, type: 1 }
+          ],
+          headerType: content.image ? 4 : content.video ? 5 : 1
+        };
       }
     } catch {}
 
@@ -1915,7 +1912,9 @@ function setupMessages(sock, ctx = {}) {
         const buttonCommands = {
           shan_btn_menu: "menu",
           shan_btn_ping: "ping",
-          shan_btn_owner: "owner"
+          shan_btn_owner: "owner",
+          shan_menu_list: "menu",
+          shan_menu_all: "allmenu"
         };
         const buttonCommand = buttonCommands[text];
 
