@@ -194,12 +194,25 @@ function prepareSocket(sock, subNumber = null) {
   const key = subNumber ? cleanNumber(subNumber) : "main";
 
   // Restore button mode separately for each main / paired bot.
-  globalThis.SHAN_BUTTON_MODE_CACHE.set(key, false);
+  // "loading" is treated as OFF, and prevents a slow DB read from
+  // overwriting a .setbutton/.unsetbutton command received during startup.
+  globalThis.SHAN_BUTTON_MODE_CACHE.set(key, "loading");
   if (mongoConnected) {
     mongoose.connection.collection("buttonmodes")
       .findOne({ _id: key })
-      .then(doc => globalThis.SHAN_BUTTON_MODE_CACHE.set(key, doc?.enabled === true))
-      .catch(error => console.error("Button mode load error:", error?.message || error));
+      .then(doc => {
+        if (globalThis.SHAN_BUTTON_MODE_CACHE.get(key) === "loading") {
+          globalThis.SHAN_BUTTON_MODE_CACHE.set(key, doc?.enabled === true);
+        }
+      })
+      .catch(error => {
+        if (globalThis.SHAN_BUTTON_MODE_CACHE.get(key) === "loading") {
+          globalThis.SHAN_BUTTON_MODE_CACHE.set(key, false);
+        }
+        console.error("Button mode load error:", error?.message || error);
+      });
+  } else {
+    globalThis.SHAN_BUTTON_MODE_CACHE.set(key, false);
   }
 
   globalThis.SHAN_SOCKETS.set(key, { sock, sub: Boolean(subNumber) });
