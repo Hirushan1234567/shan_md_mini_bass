@@ -1878,6 +1878,79 @@ function setupMessages(sock, ctx = {}) {
           continue;
         }
 
+        // Per-bot button mode controls. All command styles are aliases:
+        // .button on / .bon / .setbutton and .button off / .boff / .unsetbutton
+        const buttonModeAction =
+          parsed.command === "button"
+            ? String(parsed.args?.[0] || "").toLowerCase()
+            : ["bon", "setbutton"].includes(parsed.command)
+              ? "on"
+              : ["boff", "unsetbutton"].includes(parsed.command)
+                ? "off"
+                : "";
+
+        if (buttonModeAction || parsed.command === "button") {
+          const botKey = ctx.subNumber ? cleanNumber(ctx.subNumber) || "sub" : "main";
+          const allowed =
+            isOwner(msg) ||
+            (Boolean(ctx.subNumber) && msg?.key?.fromMe === true) ||
+            await isOwnerOrAdminNumber(getSenderNumber(msg));
+
+          if (!allowed) {
+            await sock.sendMessage(
+              jid,
+              { text: "⛔ Only the bot owner/admin can change Button Mode.\n\nSHAN_BUTTON_MODE_CONTROL" },
+              { quoted: msg }
+            );
+            continue;
+          }
+
+          if (!["on", "off"].includes(buttonModeAction)) {
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  "╭━━〔 🔘 BUTTON MODE 〕━━╮\\n\\n" +
+                  "ON  : .button on  /  .bon\\n" +
+                  "OFF : .button off /  .boff\\n\\n" +
+                  "╰━━━━━━━━━━━━━━━━━━━━╯\\n\\nSHAN_BUTTON_MODE_CONTROL"
+              },
+              { quoted: msg }
+            );
+            continue;
+          }
+
+          const enabled = buttonModeAction === "on";
+          globalThis.SHAN_BUTTON_MODE_CACHE.set(botKey, enabled);
+
+          if (mongoConnected) {
+            try {
+              await mongoose.connection.collection("buttonmodes").updateOne(
+                { _id: botKey },
+                { $set: { enabled, updatedAt: new Date() } },
+                { upsert: true }
+              );
+            } catch (error) {
+              console.error("Button mode save error:", error?.message || error);
+            }
+          }
+
+          await sock.sendMessage(
+            jid,
+            {
+              text:
+                `╭━━〔 🔘 BUTTON MODE 〕━━╮\\n\\n` +
+                `✅ Button Mode: ${enabled ? "ON" : "OFF"}\\n\\n` +
+                (enabled
+                  ? "📋 List Menu / All Menu සහ plugin text replies සඳහා buttons සක්‍රියයි."
+                  : "📝 සාමාන්‍ය text mode එක සක්‍රියයි.") +
+                "\\n\\nSHAN_BUTTON_MODE_CONTROL"
+            },
+            { quoted: msg }
+          );
+          continue;
+        }
+
         console.log(
           `📥 COMMAND: ${prefix}${parsed.command}` +
             (ctx.subNumber
