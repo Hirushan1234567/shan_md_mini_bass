@@ -491,8 +491,19 @@ function cleanupCache() {
 
 async function sendMenu(sock, msg, text) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
-  const root = process.cwd();
-  const logoPath = path.join(root, "logo.jpg");
+  const logoPath = path.join(process.cwd(), "logo.jpg");
+  const hasLogo = fs.existsSync(logoPath);
+  const image = hasLogo ? fs.readFileSync(logoPath) : null;
+
+  let sent;
+  try {
+    sent = image
+      ? await sock.sendMessage(jid, { image, caption: text }, { quoted: msg })
+      : await sock.sendMessage(jid, { text }, { quoted: msg });
+  } catch (error) {
+    console.error("[MENU] Menu image send failed:", error?.message || error);
+    sent = await sock.sendMessage(jid, { text }, { quoted: msg });
+  }
 
   const botKey = msg?.__shanSub
     ? String(msg.__shanSub).replace(/\D/g, "") || "sub"
@@ -500,43 +511,31 @@ async function sendMenu(sock, msg, text) {
   const buttonsEnabled =
     globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
 
-  // The two menu actions are intentionally separate quick-reply buttons,
-  // matching the requested WhatsApp menu layout.
-  const buttonRows = buttonsEnabled
-    ? [
-        { buttonId: "shan_menu_list", buttonText: { displayText: "☰ List Menu" }, type: 1 },
-        { buttonId: "shan_menu_all", buttonText: { displayText: "📚 All Menu" }, type: 1 }
-      ]
-    : undefined;
-
-  let sent;
-  const hasLogo = fs.existsSync(logoPath);
-  const image = hasLogo ? fs.readFileSync(logoPath) : null;
-
-  try {
-    const payload = image
-      ? { image, caption: text }
-      : { text };
-
-    if (buttonRows) {
-      payload.buttons = buttonRows;
-      payload.headerType = image ? 4 : 1;
+  if (buttonsEnabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
+    try {
+      await globalThis.SHAN_SEND_NATIVE_BUTTONS(
+        sock,
+        jid,
+        "👇 Choose your menu",
+        [
+          { id: "shan_menu_list", text: "☰ List Menu" },
+          { id: "shan_menu_all", text: "📚 All Menu" }
+        ],
+        { quoted: msg }
+      );
+    } catch (error) {
+      console.error("[MENU] Native menu buttons failed:", error?.stack || error);
+      await sock.sendMessage(
+        jid,
+        { text: "☰ List Menu: .menu\n📚 All Menu: .allmenu" },
+        { quoted: msg }
+      );
     }
-
-    sent = await sock.sendMessage(jid, payload, { quoted: msg });
-  } catch (error) {
-    console.error("[MENU] Rich menu send failed:", error?.message || error);
-
-    // Safe fallback: plain text without interactive controls.
-    sent = await sock.sendMessage(jid, { text }, { quoted: msg });
   }
 
   if (sent?.key?.id) {
     cleanupCache();
-    MENU_CACHE.set(sent.key.id, {
-      time: Date.now(),
-      jid
-    });
+    MENU_CACHE.set(sent.key.id, { time: Date.now(), jid });
   }
 
   return sent;
