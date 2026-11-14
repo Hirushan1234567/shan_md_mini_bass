@@ -44,6 +44,7 @@ const DEPLOY_LINK = "https://shanmd-ukjm.vercel.app";
 const FOOTER = `\n\n🚀 Deploy your bot: ${DEPLOY_LINK}`;
 
 globalThis.SHAN_SOCKETS = new Map(); // "main" | subNumber -> { sock, sub }
+globalThis.SHAN_BUTTON_MODE_CACHE = new Map(); // botKey -> enabled
 globalThis.SHAN_CONTACTS = new Map(); // botKey -> Set(jid)
 
 function installFooter(sock, subNumber = null) {
@@ -183,6 +184,15 @@ function prepareSocket(sock, subNumber = null) {
   installFooter(sock, subNumber);
 
   const key = subNumber ? cleanNumber(subNumber) : "main";
+
+  // Restore button mode separately for each main / paired bot.
+  globalThis.SHAN_BUTTON_MODE_CACHE.set(key, false);
+  if (mongoConnected) {
+    mongoose.connection.collection("buttonmodes")
+      .findOne({ _id: key })
+      .then(doc => globalThis.SHAN_BUTTON_MODE_CACHE.set(key, doc?.enabled === true))
+      .catch(error => console.error("Button mode load error:", error?.message || error));
+  }
 
   globalThis.SHAN_SOCKETS.set(key, { sock, sub: Boolean(subNumber) });
 
