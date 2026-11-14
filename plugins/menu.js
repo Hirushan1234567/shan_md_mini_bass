@@ -490,52 +490,49 @@ function cleanupCache() {
 ===================================================== */
 
 async function sendMenu(sock, msg, text) {
-  const jid =
-    msg.key?.remoteJid ||
-    msg.remoteJid;
-
+  const jid = msg.key?.remoteJid || msg.remoteJid;
   const root = process.cwd();
   const logoPath = path.join(root, "logo.jpg");
 
+  const botKey = msg?.__shanSub
+    ? String(msg.__shanSub).replace(/\\D/g, "") || "sub"
+    : "main";
+  const buttonsEnabled =
+    globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+
+  // The two menu actions are intentionally separate quick-reply buttons,
+  // matching the requested WhatsApp menu layout.
+  const buttonRows = buttonsEnabled
+    ? [
+        { buttonId: "shan_menu_list", buttonText: { displayText: "☰ List Menu" }, type: 1 },
+        { buttonId: "shan_menu_all", buttonText: { displayText: "📚 All Menu" }, type: 1 }
+      ]
+    : undefined;
+
   let sent;
+  const hasLogo = fs.existsSync(logoPath);
+  const image = hasLogo ? fs.readFileSync(logoPath) : null;
 
   try {
-    const isMainCategoryMenu = text.includes("CATEGORIES") && !text.includes("ALL COMMANDS");
-    if (isMainCategoryMenu) {
-      const sections = [{
-        title: "📚 Select a category",
-        rows: [
-          ...CATEGORIES.slice(0, 9).map(category => ({
-            title: `${category.icon} ${category.name}`,
-            rowId: `shan_category_${category.id}`,
-            description: category.description
-          })),
-          { title: "➡️ More categories", rowId: "shan_category_more", description: "Premium and Admin categories" }
-        ]
-      }];
-      sent = await sock.sendMessage(
-        jid,
-        { text, title: "SHAN MINI BOT", footer: "💠 Blue Neon Edition", buttonText: "⚡ Open categories", sections },
-        { quoted: msg }
-      );
-    } else if (fs.existsSync(logoPath)) {
-      sent = await sock.sendMessage(jid, { image: fs.readFileSync(logoPath), caption: text }, { quoted: msg });
-    } else {
-      sent = await sock.sendMessage(jid, { text }, { quoted: msg });
-    }
-  } catch (error) {
-    console.error("[MENU] Image send failed:", error.message);
+    const payload = image
+      ? { image, caption: text }
+      : { text };
 
-    sent = await sock.sendMessage(
-      jid,
-      { text },
-      { quoted: msg }
-    );
+    if (buttonRows) {
+      payload.buttons = buttonRows;
+      payload.headerType = image ? 4 : 1;
+    }
+
+    sent = await sock.sendMessage(jid, payload, { quoted: msg });
+  } catch (error) {
+    console.error("[MENU] Rich menu send failed:", error?.message || error);
+
+    // Safe fallback: plain text without interactive controls.
+    sent = await sock.sendMessage(jid, { text }, { quoted: msg });
   }
 
   if (sent?.key?.id) {
     cleanupCache();
-
     MENU_CACHE.set(sent.key.id, {
       time: Date.now(),
       jid
