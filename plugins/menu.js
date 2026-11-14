@@ -500,21 +500,28 @@ async function sendMenu(sock, msg, text) {
   let sent;
 
   try {
-    if (fs.existsSync(logoPath)) {
+    const isMainCategoryMenu = text.includes("CATEGORIES") && !text.includes("ALL COMMANDS");
+    if (isMainCategoryMenu) {
+      const sections = [{
+        title: "📚 Select a category",
+        rows: [
+          ...CATEGORIES.map(category => ({
+            title: `${category.icon} ${category.name}`,
+            rowId: `shan_category_${category.id}`,
+            description: category.description
+          })),
+          { title: "📋 All commands", rowId: "shan_category_all", description: "Show every command" }
+        ]
+      }];
       sent = await sock.sendMessage(
         jid,
-        {
-          image: fs.readFileSync(logoPath),
-          caption: text
-        },
+        { text, title: "SHAN MINI BOT", footer: "💠 Blue Neon Edition", buttonText: "⚡ Open categories", sections },
         { quoted: msg }
       );
+    } else if (fs.existsSync(logoPath)) {
+      sent = await sock.sendMessage(jid, { image: fs.readFileSync(logoPath), caption: text }, { quoted: msg });
     } else {
-      sent = await sock.sendMessage(
-        jid,
-        { text },
-        { quoted: msg }
-      );
+      sent = await sock.sendMessage(jid, { text }, { quoted: msg });
     }
   } catch (error) {
     console.error("[MENU] Image send failed:", error.message);
@@ -562,6 +569,19 @@ async function handleReply(sock, msg, text) {
   const input = String(text || "")
     .trim()
     .toLowerCase();
+
+  if (input.startsWith("shan_category_")) {
+    const selected = input.slice("shan_category_".length);
+    if (selected === "all") {
+      await sendMenu(sock, msg, await buildAllMenu());
+      return true;
+    }
+    const category = CATEGORIES.find(item => item.id === selected);
+    if (category) {
+      await sendMenu(sock, msg, await buildCategory(category));
+      return true;
+    }
+  }
 
   if (input === "menu" || input === "help") {
     await sendMenu(
