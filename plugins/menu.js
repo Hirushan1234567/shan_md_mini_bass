@@ -495,7 +495,7 @@ async function sendMenu(sock, msg, text) {
   const logoPath = path.join(root, "logo.jpg");
 
   const botKey = msg?.__shanSub
-    ? String(msg.__shanSub).replace(/\\D/g, "") || "sub"
+    ? String(msg.__shanSub).replace(/\D/g, "") || "sub"
     : "main";
   const buttonsEnabled =
     globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
