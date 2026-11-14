@@ -1981,7 +1981,7 @@ function setupMessages(sock, ctx = {}) {
                 (enabled
                   ? "📋 List Menu / All Menu සහ plugin text replies සඳහා buttons සක්‍රියයි."
                   : "📝 සාමාන්‍ය text mode එක සක්‍රියයි.") +
-                "\n\nSHAN_BUTTON_MODE_CONTROL"
+                ""
             },
             { quoted: msg }
           );
