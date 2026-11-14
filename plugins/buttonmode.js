@@ -55,7 +55,7 @@ export default {
       : "✅ WhatsApp Button Mode OFF\n\nදැන් bot එක සාමාන්‍ය text replies යවයි.";
 
     await sock.sendMessage(jid, {
-      text: status + "\n\nSHAN_BUTTON_MODE_CONTROL"
+      text: status
     }, { quoted: msg });
   }
 };
