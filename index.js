@@ -100,13 +100,18 @@ function installFooter(sock, subNumber = null) {
         const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
         if (enabled) {
           content = {
-            ...content,
+            text: content.text,
             footer: "SHAN MINI BOT",
-            buttons: [
-              { buttonId: "shan_btn_menu", buttonText: { displayText: "📋 Menu" }, type: 1 },
-              { buttonId: "shan_btn_ping", buttonText: { displayText: "🏓 Ping" }, type: 1 },
-              { buttonId: "shan_btn_owner", buttonText: { displayText: "👑 Owner" }, type: 1 }
-            ]
+            title: "SHAN MINI BOT",
+            buttonText: "⚡ Select",
+            sections: [{
+              title: "Quick actions",
+              rows: [
+                { title: "📋 Menu", rowId: "shan_btn_menu", description: "Open bot menu" },
+                { title: "🏓 Ping", rowId: "shan_btn_ping", description: "Check bot response" },
+                { title: "👑 Owner", rowId: "shan_btn_owner", description: "Owner contact" }
+              ]
+            }]
           };
         }
       }
@@ -1184,12 +1189,13 @@ function getMessageText(msg) {
     return message.documentMessage.caption;
   }
 
-  // WhatsApp legacy interactive button response.
-  const buttonId =
+  // Interactive list and legacy button replies.
+  const interactiveId =
+    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
     message.buttonsResponseMessage?.selectedButtonId ||
     message.templateButtonReplyMessage?.selectedId;
-  if (typeof buttonId === "string") {
-    return buttonId;
+  if (typeof interactiveId === "string") {
+    return interactiveId;
   }
 
   return "";
