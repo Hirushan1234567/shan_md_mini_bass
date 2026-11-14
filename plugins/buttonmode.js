@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 function botKey(msg) {
   return msg?.__shanSub
-    ? String(msg.__shanSub).replace(/\\D/g, "") || "sub"
+    ? String(msg.__shanSub).replace(/\D/g, "") || "sub"
     : "main";
 }
 
@@ -12,9 +12,9 @@ function isBotOwner(msg) {
   }
 
   if (!msg?.__shanSub) return false;
-  const ownNumber = String(msg.__shanSub).replace(/\\D/g, "");
+  const ownNumber = String(msg.__shanSub).replace(/\D/g, "");
   const sender = typeof globalThis.SHAN_GET_SENDER === "function"
-    ? String(globalThis.SHAN_GET_SENDER(msg)).replace(/\\D/g, "")
+    ? String(globalThis.SHAN_GET_SENDER(msg)).replace(/\D/g, "")
     : "";
   return msg?.key?.fromMe === true || (ownNumber && sender === ownNumber);
 }
