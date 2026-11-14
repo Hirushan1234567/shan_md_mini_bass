@@ -1119,6 +1119,21 @@ function isMainOwner(msg) {
   return cleanNumber(getSenderNumber(msg)) === MAIN_OWNER_NUMBER;
 }
 
+// Share the same owner validation with plugins (including buttonmode.js).
+globalThis.SHAN_IS_OWNER_MSG = msg => {
+  if (isOwner(msg)) return true;
+
+  return Boolean(
+    msg?.__shanSub &&
+    (
+      msg?.key?.fromMe === true ||
+      cleanNumber(getSenderNumber(msg)) === cleanNumber(msg.__shanSub)
+    )
+  );
+};
+
+globalThis.SHAN_GET_SENDER = msg => getSenderNumber(msg);
+
 /* =====================================================
 OWNER / ADMIN NUMBER CHECK (number එකකින්)
 Owner හෝ admin කෙනෙක්ද කියලා බලනවා.
