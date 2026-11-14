@@ -91,11 +91,14 @@ function installFooter(sock, subNumber = null) {
         typeof content === "object" &&
         typeof content.text === "string" &&
         !content.buttons &&
+        !content.sections &&
+        !content.listMessage &&
+        !content.templateButtons &&
+        !content.interactiveMessage &&
         !content.edit &&
         !content.react &&
         !content.delete &&
-        !content.forward &&
-        !content.text.includes("SHAN_BUTTON_MODE_CONTROL")
+        !content.forward
       ) {
         const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
         if (enabled) {
@@ -105,7 +108,7 @@ function installFooter(sock, subNumber = null) {
             title: "SHAN MINI BOT",
             buttonText: "⚡ Select",
             sections: [{
-              title: "Quick actions",
+              title: "⚡ Quick Actions",
               rows: [
                 { title: "📋 Menu", rowId: "shan_btn_menu", description: "Open bot menu" },
                 { title: "🏓 Ping", rowId: "shan_btn_ping", description: "Check bot response" },
@@ -1194,8 +1197,21 @@ function getMessageText(msg) {
     message.listResponseMessage?.singleSelectReply?.selectedRowId ||
     message.buttonsResponseMessage?.selectedButtonId ||
     message.templateButtonReplyMessage?.selectedId;
-  if (typeof interactiveId === "string") {
+
+  if (typeof interactiveId === "string" && interactiveId) {
     return interactiveId;
+  }
+
+  // Newer WhatsApp interactive replies (when the client sends native-flow data).
+  const nativeFlowJson =
+    message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+
+  if (typeof nativeFlowJson === "string") {
+    try {
+      const data = JSON.parse(nativeFlowJson);
+      const nativeId = data?.id || data?.button_id || data?.selectedId;
+      if (typeof nativeId === "string" && nativeId) return nativeId;
+    } catch {}
   }
 
   return "";
@@ -1905,7 +1921,7 @@ function setupMessages(sock, ctx = {}) {
           if (!allowed) {
             await sock.sendMessage(
               jid,
-              { text: "⛔ Only the bot owner/admin can change Button Mode.\n\nSHAN_BUTTON_MODE_CONTROL" },
+              { text: "⛔ Only the bot owner/admin can change Button Mode." },
               { quoted: msg }
             );
             continue;
@@ -1919,7 +1935,7 @@ function setupMessages(sock, ctx = {}) {
                   "╭━━〔 🔘 BUTTON MODE 〕━━╮\n\n" +
                   "ON  : .button on  /  .bon\n" +
                   "OFF : .button off /  .boff\n\n" +
-                  "╰━━━━━━━━━━━━━━━━━━━━╯\n\nSHAN_BUTTON_MODE_CONTROL"
+                  "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
               },
               { quoted: msg }
             );
