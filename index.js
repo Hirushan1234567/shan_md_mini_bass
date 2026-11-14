@@ -46,7 +46,7 @@ const FOOTER = `\n\n🚀 Deploy your bot: ${DEPLOY_LINK}`;
 globalThis.SHAN_SOCKETS = new Map(); // "main" | subNumber -> { sock, sub }
 globalThis.SHAN_CONTACTS = new Map(); // botKey -> Set(jid)
 
-function installFooter(sock) {
+function installFooter(sock, subNumber = null) {
   if (sock.__shanFooter) {
     return;
   }
@@ -80,6 +80,33 @@ function installFooter(sock) {
           !content.caption.includes(DEPLOY_LINK)
         ) {
           content = { ...content, caption: content.caption + FOOTER };
+        }
+      }
+
+      // Optional per-bot WhatsApp button mode (plain text plugin replies only).
+      const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
+      if (
+        content &&
+        typeof content === "object" &&
+        typeof content.text === "string" &&
+        !content.buttons &&
+        !content.edit &&
+        !content.react &&
+        !content.delete &&
+        !content.forward &&
+        !content.text.includes("SHAN_BUTTON_MODE_CONTROL")
+      ) {
+        const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+        if (enabled) {
+          content = {
+            ...content,
+            footer: "SHAN MINI BOT",
+            buttons: [
+              { buttonId: "shan_btn_menu", buttonText: { displayText: "📋 Menu" }, type: 1 },
+              { buttonId: "shan_btn_ping", buttonText: { displayText: "🏓 Ping" }, type: 1 },
+              { buttonId: "shan_btn_owner", buttonText: { displayText: "👑 Owner" }, type: 1 }
+            ]
+          };
         }
       }
     } catch {}
@@ -153,7 +180,7 @@ async function loadContacts(botKey) {
 }
 
 function prepareSocket(sock, subNumber = null) {
-  installFooter(sock);
+  installFooter(sock, subNumber);
 
   const key = subNumber ? cleanNumber(subNumber) : "main";
 
@@ -1147,6 +1174,14 @@ function getMessageText(msg) {
     return message.documentMessage.caption;
   }
 
+  // WhatsApp legacy interactive button response.
+  const buttonId =
+    message.buttonsResponseMessage?.selectedButtonId ||
+    message.templateButtonReplyMessage?.selectedId;
+  if (typeof buttonId === "string") {
+    return buttonId;
+  }
+
   return "";
 }
 
@@ -1817,8 +1852,17 @@ function setupMessages(sock, ctx = {}) {
 
         console.log("📝 MESSAGE TEXT:", JSON.stringify(text));
 
+        const buttonCommands = {
+          shan_btn_menu: "menu",
+          shan_btn_ping: "ping",
+          shan_btn_owner: "owner"
+        };
+        const buttonCommand = buttonCommands[text];
+
         const prefix = settings.prefix || DEFAULT_PREFIX;
-        const parsed = parseCommand(text, prefix);
+        const parsed = buttonCommand
+          ? { command: buttonCommand, args: [] }
+          : parseCommand(text, prefix);
 
         if (!parsed) {
           continue;
