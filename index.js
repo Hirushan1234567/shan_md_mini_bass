@@ -20,7 +20,10 @@ const makeWASocket =
 const {
   DisconnectReason,
   useMultiFileAuthState,
-  fetchLatestWaWebVersion
+  fetchLatestWaWebVersion,
+  proto,
+  generateWAMessageFromContent,
+  isJidGroup
 } = baileys;
 
 /* =====================================================
@@ -46,6 +49,65 @@ const FOOTER = `\n\n🚀 Deploy your bot: ${DEPLOY_LINK}`;
 globalThis.SHAN_SOCKETS = new Map(); // "main" | subNumber -> { sock, sub }
 globalThis.SHAN_BUTTON_MODE_CACHE = new Map(); // botKey -> enabled
 globalThis.SHAN_CONTACTS = new Map(); // botKey -> Set(jid)
+
+// Send real WhatsApp Native Flow buttons. Legacy buttons/sections are not
+// converted to native-flow by the pinned Baileys 6.7.24 package.
+async function sendShanNativeButtons(sock, jid, text, buttons, options = {}) {
+  const nativeButtons = buttons.map(button => ({
+    name: "quick_reply",
+    buttonParamsJson: JSON.stringify({
+      display_text: button.text,
+      id: button.id
+    })
+  }));
+
+  const interactiveMessage = proto.Message.InteractiveMessage.create({
+    body: proto.Message.InteractiveMessage.Body.create({ text: String(text || "Choose an option") }),
+    footer: proto.Message.InteractiveMessage.Footer.create({ text: "SHAN MINI BOT" }),
+    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+      buttons: nativeButtons.map(button =>
+        proto.Message.InteractiveMessage.NativeFlowMessage.NativeFlowButton.create(button)
+      ),
+      messageParamsJson: "{}",
+      messageVersion: 1
+    })
+  });
+
+  const waMessage = generateWAMessageFromContent(
+    jid,
+    { interactiveMessage },
+    { userJid: sock.user?.id, quoted: options.quoted }
+  );
+
+  const bizNode = {
+    tag: "biz",
+    attrs: {
+      actual_actors: "2",
+      host_storage: "2",
+      privacy_mode_ts: String(Math.floor(Date.now() / 1000) - 77980457)
+    },
+    content: [
+      {
+        tag: "interactive",
+        attrs: { type: "native_flow", v: "1" },
+        content: [{ tag: "native_flow", attrs: { v: "9", name: "mixed" } }]
+      },
+      { tag: "quality_control", attrs: { source_type: "third_party" } }
+    ]
+  };
+
+  const botNode = { tag: "bot", attrs: { biz_bot: "1" } };
+  const additionalNodes = isJidGroup(jid) ? [bizNode] : [botNode, bizNode];
+
+  await sock.relayMessage(jid, waMessage.message, {
+    messageId: waMessage.key.id,
+    additionalNodes
+  });
+
+  return waMessage;
+}
+
+globalThis.SHAN_SEND_NATIVE_BUTTONS = sendShanNativeButtons;
 
 function installFooter(sock, subNumber = null) {
   if (sock.__shanFooter) {
@@ -84,36 +146,29 @@ function installFooter(sock, subNumber = null) {
         }
       }
 
-      // Per-bot quick-reply buttons for text and caption replies.
-      // Preserve the original payload (image, video, document, caption, etc.).
+      // Modern WhatsApp Native Flow quick replies for ordinary text replies.
       const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
       const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
-      const hasReplyText =
-        typeof content?.text === "string" ||
-        typeof content?.caption === "string";
 
       if (
         enabled &&
-        hasReplyText &&
+        typeof content?.text === "string" &&
         !content.buttons &&
         !content.templateButtons &&
         !content.sections &&
-        !content.listMessage &&
         !content.interactiveMessage &&
         !content.edit &&
         !content.react &&
         !content.delete &&
         !content.forward
       ) {
-        content = {
-          ...content,
-          buttons: [
-            { buttonId: "shan_btn_menu", buttonText: { displayText: "📋 Menu" }, type: 1 },
-            { buttonId: "shan_btn_ping", buttonText: { displayText: "🏓 Ping" }, type: 1 },
-            { buttonId: "shan_btn_owner", buttonText: { displayText: "👑 Owner" }, type: 1 }
-          ],
-          headerType: content.image ? 4 : content.video ? 5 : 1
-        };
+        const body = content.text;
+        const quoted = options?.quoted;
+        return sendShanNativeButtons(sock, jid, body, [
+          { id: "shan_btn_menu", text: "📋 Menu" },
+          { id: "shan_btn_ping", text: "🏓 Ping" },
+          { id: "shan_btn_owner", text: "👑 Owner" }
+        ], { quoted });
       }
     } catch {}
 
