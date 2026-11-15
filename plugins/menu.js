@@ -535,25 +535,16 @@ async function sendMenu(sock, msg, text) {
 ===================================================== */
 
 async function handleReply(sock, msg, text) {
-  const quoted =
-    msg.message?.extendedTextMessage?.contextInfo;
-
+  const quoted = msg.message?.extendedTextMessage?.contextInfo;
   const quotedId = quoted?.stanzaId;
-
-  if (!quotedId || !MENU_CACHE.has(quotedId)) {
-    return false;
-  }
-
-  const cached = MENU_CACHE.get(quotedId);
-
-  if (Date.now() - cached.time > MENU_TIMEOUT) {
+  const input = String(text || "").trim().toLowerCase();
+  const hasCachedMenu = Boolean(quotedId && MENU_CACHE.has(quotedId));
+  if (!hasCachedMenu && !input.startsWith("shan_category_") && !input.startsWith("shan_menu_")) return false;
+  const cached = hasCachedMenu ? MENU_CACHE.get(quotedId) : null;
+  if (cached && Date.now() - cached.time > MENU_TIMEOUT) {
     MENU_CACHE.delete(quotedId);
     return false;
   }
-
-  const input = String(text || "")
-    .trim()
-    .toLowerCase();
 
   if (input === "shan_menu_list") { await sendCategoryList(sock, msg); return true; }
   if (input === "shan_menu_all") { await sendAllCommandList(sock, msg); return true; }
