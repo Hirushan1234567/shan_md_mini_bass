@@ -1351,16 +1351,12 @@ async function handlePluginReply(sock, msg) {
   }
 
   const quoted = getQuotedMessage(msg);
+  const isInteractiveAction = /^(shan_category_|shan_yt_|shan_tt_|shan_menu_)/i.test(text);
+  if (!quoted && !isInteractiveAction) return false;
 
-  if (!quoted) {
-    return false;
-  }
-
-  const quotedText =
-    quoted.conversation ||
-    quoted.extendedTextMessage?.text ||
-    quoted.imageMessage?.caption ||
-    "";
+  const quotedText = quoted
+    ? (quoted.conversation || quoted.extendedTextMessage?.text || quoted.imageMessage?.caption || "")
+    : "";
 
   if (quotedText.includes("SHAN_SETTINGS_MENU_V1")) {
     const plugin = plugins.get("settings");
