@@ -28,17 +28,26 @@ export default {
     const url = firstUrl(Array.isArray(args) ? args.join(" ") : String(args || ""));
     if (!url || !TIKTOK_URL.test(url)) return sock.sendMessage(chat, { text: "🎵 *SHAN TIKTOK DOWNLOADER*\n\nUse: .tt <TikTok URL>" }, { quoted: msg });
     if (!API_KEY) return sock.sendMessage(chat, { text: "❌ TikTok API key is not configured." }, { quoted: msg });
-    const id = makeId(); pending.set(id, { url, time: Date.now() });
+    const id = makeId(); pending.set(id, { url, time: Date.now(), chat });
     for (const [key, value] of pending) if (Date.now() - value.time > 600000) pending.delete(key);
-    if (typeof globalThis.SHAN_SEND_NATIVE_BUTTONS !== "function") return sock.sendMessage(chat, { text: "TikTok format buttons are unavailable in this WhatsApp client." }, { quoted: msg });
-    await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, chat, "💠 Choose your TikTok download format", [
-      { id: `shan_tt_${id}_video`, text: "🎬 Video" }, { id: `shan_tt_${id}_audio`, text: "🎧 Audio" }, { id: `shan_tt_${id}_document`, text: "📁 Document" }
-    ], { quoted: msg });
+    const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+    const buttonsEnabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+    if (buttonsEnabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
+      await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, chat, "💠 Choose your TikTok download format", [
+        { id: `shan_tt_${id}_video`, text: "🎬 Video" }, { id: `shan_tt_${id}_audio`, text: "🎧 Audio" }, { id: `shan_tt_${id}_document`, text: "📁 Document" }
+      ], { quoted: msg });
+    } else {
+      await sock.sendMessage(chat, { text: "🎬 Reply *video*\n🎧 Reply *audio*\n📁 Reply *document*" }, { quoted: msg });
+    }
   },
   async handleReply(sock, msg, text) {
-    const match = String(text || "").trim().match(/^shan_tt_([a-z0-9]{4,8})_(video|audio|document)$/i);
-    if (!match) return false;
-    const [, id, format] = match, entry = pending.get(id);
+    const input = String(text || "").trim().toLowerCase();
+    const match = input.match(/^shan_tt_([a-z0-9]{4,8})_(video|audio|document)$/i);
+    const format = match ? match[2] : (["video", "audio", "document"].includes(input) ? input : "");
+    if (!format) return false;
+    const chat = msg?.key?.remoteJid;
+    const id = match?.[1] || [...pending.entries()].reverse().find(([, value]) => value.chat === chat)?.[0];
+    const entry = id ? pending.get(id) : null;
     if (!entry || Date.now() - entry.time > 600000) {
       pending.delete(id); await sock.sendMessage(msg.key.remoteJid, { text: "⌛ This TikTok selection expired. Please send the link again." }, { quoted: msg }); return true;
     }
