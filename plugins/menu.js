@@ -489,55 +489,39 @@ function cleanupCache() {
    SEND MENU
 ===================================================== */
 
+async function sendCategoryList(sock, msg) {
+  const jid = msg.key?.remoteJid || msg.remoteJid;
+  const rows = CATEGORIES.map(category => ({ title: `${category.icon} ${category.name}`, rowId: `shan_category_${category.id}`, description: category.description }));
+  rows.push({ title: "📚 ALL COMMANDS", rowId: "shan_category_all", description: "Browse every command" });
+  const sent = await sock.sendMessage(jid, { text: "💠 SHAN MINI BOT — Select a category", title: "LIST MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT CATEGORY", sections: [{ title: "📂 AVAILABLE CATEGORIES", rows }] }, { quoted: msg });
+  if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "categories" }); }
+  return sent;
+}
+async function sendAllCommandList(sock, msg) {
+  const jid = msg.key?.remoteJid || msg.remoteJid, prefix = getPrefix(), sections = [];
+  for (const category of CATEGORIES) {
+    const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
+    if (!items.length) continue;
+    sections.push({ title: `${category.icon} ${category.name}`, rows: items.map(([command, description]) => ({ title: `${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description })) });
+  }
+  return sock.sendMessage(jid, { text: "📚 SHAN MINI BOT — All commands", title: "ALL MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT COMMAND", sections }, { quoted: msg });
+}
 async function sendMenu(sock, msg, text) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
-  const logoPath = path.join(process.cwd(), "logo.jpg");
-  const hasLogo = fs.existsSync(logoPath);
-  const image = hasLogo ? fs.readFileSync(logoPath) : null;
-
+  const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+  const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+  if (enabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
+    const sent = await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, jid, "💠 SHAN MINI BOT — Choose a menu", [
+      { id: "shan_menu_list", text: "☰ List Menu" }, { id: "shan_menu_all", text: "📚 All Menu" }
+    ], { quoted: msg });
+    if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" }); }
+    return sent;
+  }
+  const logoPath = path.join(process.cwd(), "logo.jpg"), image = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
   let sent;
-  try {
-    sent = image
-      ? await sock.sendMessage(jid, { image, caption: text }, { quoted: msg })
-      : await sock.sendMessage(jid, { text }, { quoted: msg });
-  } catch (error) {
-    console.error("[MENU] Menu image send failed:", error?.message || error);
-    sent = await sock.sendMessage(jid, { text }, { quoted: msg });
-  }
-
-  const botKey = msg?.__shanSub
-    ? String(msg.__shanSub).replace(/\D/g, "") || "sub"
-    : "main";
-  const buttonsEnabled =
-    globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
-
-  if (buttonsEnabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
-    try {
-      await globalThis.SHAN_SEND_NATIVE_BUTTONS(
-        sock,
-        jid,
-        "👇 Choose your menu",
-        [
-          { id: "shan_menu_list", text: "☰ List Menu" },
-          { id: "shan_menu_all", text: "📚 All Menu" }
-        ],
-        { quoted: msg }
-      );
-    } catch (error) {
-      console.error("[MENU] Native menu buttons failed:", error?.stack || error);
-      await sock.sendMessage(
-        jid,
-        { text: "☰ List Menu: .menu\n📚 All Menu: .allmenu" },
-        { quoted: msg }
-      );
-    }
-  }
-
-  if (sent?.key?.id) {
-    cleanupCache();
-    MENU_CACHE.set(sent.key.id, { time: Date.now(), jid });
-  }
-
+  try { sent = image ? await sock.sendMessage(jid, { image, caption: text }, { quoted: msg }) : await sock.sendMessage(jid, { text }, { quoted: msg }); }
+  catch (error) { console.error("[MENU] Menu image send failed:", error?.message || error); sent = await sock.sendMessage(jid, { text }, { quoted: msg }); }
+  if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" }); }
   return sent;
 }
 
@@ -566,6 +550,8 @@ async function handleReply(sock, msg, text) {
     .trim()
     .toLowerCase();
 
+  if (input === "shan_menu_list") { await sendCategoryList(sock, msg); return true; }
+  if (input === "shan_menu_all") { await sendAllCommandList(sock, msg); return true; }
   if (input === "shan_category_more") {
     const jid = msg.key?.remoteJid || msg.remoteJid;
     const rows = CATEGORIES.slice(9).map(category => ({
@@ -592,7 +578,14 @@ async function handleReply(sock, msg, text) {
     }
     const category = CATEGORIES.find(item => item.id === selected);
     if (category) {
-      await sendMenu(sock, msg, await buildCategory(category));
+      const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+      if (globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true) {
+        const prefix = getPrefix();
+        const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
+        const rows = items.map(([command, description]) => ({ title: `${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description }));
+        const sent = await sock.sendMessage(msg.key?.remoteJid || msg.remoteJid, { text: `${category.icon} ${category.name} — Select a command`, title: "COMMANDS", footer: "SHAN MINI BOT • BLUE NEON", buttonText: "SELECT COMMAND", sections: [{ title: "AVAILABLE COMMANDS", rows }] }, { quoted: msg });
+        if (sent?.key?.id) MENU_CACHE.set(sent.key.id, { time: Date.now(), jid: msg.key?.remoteJid || msg.remoteJid, kind: "commands" });
+      } else { await sendMenu(sock, msg, await buildCategory(category)); }
       return true;
     }
   }
@@ -648,7 +641,8 @@ const menuPlugin = {
     "menu",
     "help",
     "allmenu",
-    "list"
+    "list",
+    "listmenu"
   ],
 
   category: "main",
@@ -666,11 +660,11 @@ const menuPlugin = {
       .toLowerCase()
       .trim();
 
-    // .allmenu → Display all categories and commands
+    if (selectedCommand === "listmenu") return sendCategoryList(sock, msg);
     if (selectedCommand === "allmenu") {
-      const text = await buildAllMenu();
-
-      return sendMenu(sock, msg, text);
+      const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+      if (globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true) return sendAllCommandList(sock, msg);
+      return sendMenu(sock, msg, await buildAllMenu());
     }
 
     // .menu / .help / .list → Main menu
