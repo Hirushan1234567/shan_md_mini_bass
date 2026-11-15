@@ -493,19 +493,24 @@ async function sendCategoryList(sock, msg) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
   const rows = CATEGORIES.map(category => ({ title: `${category.icon} ${category.name}`, rowId: `shan_category_${category.id}`, description: category.description }));
   rows.push({ title: "📚 ALL COMMANDS", rowId: "shan_category_all", description: "Browse every command" });
-  const sent = await sock.sendMessage(jid, { text: "💠 SHAN MINI BOT — Select a category", title: "LIST MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT CATEGORY", sections: [{ title: "📂 AVAILABLE CATEGORIES", rows }] }, { quoted: msg });
+  const sections = [];
+  for (let i = 0; i < rows.length; i += 10) sections.push({ title: i === 0 ? "📂 CATEGORIES" : "📂 MORE CATEGORIES", rows: rows.slice(i, i + 10) });
+  const sent = await sock.sendMessage(jid, { text: "💠 SHAN MINI BOT — Select a category", title: "LIST MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT CATEGORY", sections }, { quoted: msg });
   if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "categories" }); }
   return sent;
 }
+
 async function sendAllCommandList(sock, msg) {
-  const jid = msg.key?.remoteJid || msg.remoteJid, prefix = getPrefix(), sections = [];
+  const jid = msg.key?.remoteJid || msg.remoteJid, prefix = getPrefix(), allRows = [];
   for (const category of CATEGORIES) {
     const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
-    if (!items.length) continue;
-    sections.push({ title: `${category.icon} ${category.name}`, rows: items.map(([command, description]) => ({ title: `${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description })) });
+    for (const [command, description] of items) allRows.push({ title: `${category.icon} ${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description: `${category.name} • ${description}` });
   }
+  const sections = [];
+  for (let i = 0; i < allRows.length; i += 10) sections.push({ title: `ALL COMMANDS ${Math.floor(i / 10) + 1}`, rows: allRows.slice(i, i + 10) });
   return sock.sendMessage(jid, { text: "📚 SHAN MINI BOT — All commands", title: "ALL MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT COMMAND", sections }, { quoted: msg });
 }
+
 async function sendMenu(sock, msg, text) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
   const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
@@ -573,7 +578,7 @@ async function handleReply(sock, msg, text) {
   if (input.startsWith("shan_category_")) {
     const selected = input.slice("shan_category_".length);
     if (selected === "all") {
-      await sendMenu(sock, msg, await buildAllMenu());
+      await sendAllCommandList(sock, msg);
       return true;
     }
     const category = CATEGORIES.find(item => item.id === selected);
@@ -583,7 +588,9 @@ async function handleReply(sock, msg, text) {
         const prefix = getPrefix();
         const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
         const rows = items.map(([command, description]) => ({ title: `${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description }));
-        const sent = await sock.sendMessage(msg.key?.remoteJid || msg.remoteJid, { text: `${category.icon} ${category.name} — Select a command`, title: "COMMANDS", footer: "SHAN MINI BOT • BLUE NEON", buttonText: "SELECT COMMAND", sections: [{ title: "AVAILABLE COMMANDS", rows }] }, { quoted: msg });
+        const sections = [];
+        for (let i = 0; i < rows.length; i += 10) sections.push({ title: i === 0 ? "AVAILABLE COMMANDS" : "MORE COMMANDS", rows: rows.slice(i, i + 10) });
+        const sent = await sock.sendMessage(msg.key?.remoteJid || msg.remoteJid, { text: `${category.icon} ${category.name} — Select a command`, title: "COMMANDS", footer: "SHAN MINI BOT • BLUE NEON", buttonText: "SELECT COMMAND", sections }, { quoted: msg });
         if (sent?.key?.id) MENU_CACHE.set(sent.key.id, { time: Date.now(), jid: msg.key?.remoteJid || msg.remoteJid, kind: "commands" });
       } else { await sendMenu(sock, msg, await buildCategory(category)); }
       return true;
