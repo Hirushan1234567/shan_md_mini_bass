@@ -1968,7 +1968,7 @@ function setupMessages(sock, ctx = {}) {
           shan_btn_menu: "menu",
           shan_btn_ping: "ping",
           shan_btn_owner: "owner",
-          shan_menu_list: "menu",
+          shan_menu_list: "listmenu",
           shan_menu_all: "allmenu"
         };
         const buttonCommand = buttonCommands[text];
@@ -2874,28 +2874,10 @@ async function startBot() {
         if (statusCode === DisconnectReason.badSession) {
           badSessionRetries += 1;
 
-          if (badSessionRetries <= BAD_SESSION_MAX_RETRIES) {
-            const delay = Math.min(5000 * badSessionRetries, 30000);
-
-            console.log(
-              `⚠️ Stream error (500). Retry ${badSessionRetries}/${BAD_SESSION_MAX_RETRIES}...`
-            );
-
-            if (!state.creds.registered) {
-              pairingRequested = false;
-            }
-
-            scheduleReconnect(delay);
-
-            return;
-          }
-
-          pairingRequested = false;
-          pairingNumber = "";
-
-          console.log("❌ Bad WhatsApp session (retries exhausted).");
-          console.log(`🗑️ Delete "${SESSION_DIR}" and pair again.`);
-
+          const delay = Math.min(5000 * Math.max(1, badSessionRetries), 60000);
+          console.log(`⚠️ Temporary stream/session error (500). Retry ${badSessionRetries} in ${delay}ms; saved credentials will be kept.`);
+          if (!state.creds.registered) pairingRequested = false;
+          scheduleReconnect(delay);
           return;
         }
 
