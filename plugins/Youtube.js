@@ -20,10 +20,9 @@ const MARKER = "SELECT VIDEO QUALITY";
 const CACHE_TIME = 10 * 60 * 1000;
 
 const OPTIONS = [
-    { n: 1, h: 720, doc: false, label: "🎬 Video 720p" },
-    { n: 2, h: 480, doc: false, label: "🎬 Video 480p" },
-    { n: 3, h: 360, doc: false, label: "🎬 Video 360p" },
-    { n: 4, h: 720, doc: true, label: "📄 Document 720p" }
+    { key: "video", h: 1080, doc: false, audio: false, label: "🎬 Video" },
+    { key: "audio", h: 0, doc: false, audio: true, label: "🎧 Audio" },
+    { key: "document", h: 1080, doc: true, audio: false, label: "📁 Document" }
 ];
 
 const UA =
@@ -240,6 +239,29 @@ async function savetubeVideoLink(id, h) {
     throw new Error("SaveTube download link not found");
 }
 
+async function fetchAudioBuffer(id) {
+    const url = `https://www.youtube.com/watch?v=${id}`, errors = [];
+    for (const ep of ["/mp3", "/audio", "/ytmp3"]) {
+        const { status, json } = await apiGet(ep, { url, format: "mp3", quality: "128" });
+        if (status === 404) continue;
+        const link = apiOk(json) ? pickUrl(json) : "";
+        if (link) { try { return await downloadBuffer(link); } catch (error) { errors.push(error?.message || String(error)); } }
+    }
+    try {
+        const cdnRes = await fetch("https://media.savetube.vip/api/random-cdn", { headers: ST_HEADERS, signal: AbortSignal.timeout(30000) }).then(r => r.json()).catch(() => null);
+        if (!cdnRes?.cdn) throw new Error("SaveTube server unavailable");
+        const cdn = cdnRes.cdn;
+        const info = await fetch(`https://${cdn}/v2/info`, { method: "POST", headers: ST_HEADERS, body: JSON.stringify({ url }), signal: AbortSignal.timeout(30000) }).then(r => r.json()).catch(() => null);
+        if (!info?.data) throw new Error("SaveTube info failed");
+        const enc = Buffer.from(info.data, "base64"), dec = createDecipheriv("aes-128-cbc", METADATA_KEY, enc.subarray(0, 16));
+        const meta = JSON.parse(Buffer.concat([dec.update(enc.subarray(16)), dec.final()]).toString("utf8"));
+        const dl = await fetch(`https://${cdn}/download`, { method: "POST", headers: ST_HEADERS, body: JSON.stringify({ id, downloadType: "audio", quality: "128", key: meta.key }), signal: AbortSignal.timeout(60000) }).then(r => r.json()).catch(() => null);
+        if (!dl?.data?.downloadUrl) throw new Error("Audio link not found");
+        return await downloadBuffer(dl.data.downloadUrl);
+    } catch (error) { errors.push(error?.message || String(error)); }
+    throw new Error(errors.join(" | ") || "Audio download failed");
+}
+
 /* =====================================================
    DOWNLOAD (buffer)
 ===================================================== */
@@ -365,22 +387,22 @@ async function sendCard(sock, msg, base) {
         `┃ 📅 Released  : ${v.published || "N/A"}\n` +
         `┃ ⏱️ Duration  : ${fmtDur(v.duration)}\n` +
         "┣━━━━━━━━━━━━━━━━━━━\n" +
-        `┃ 💎 ${MARKER}\n` +
+        "┃ 💎 SELECT DOWNLOAD FORMAT\n" +
         "┃\n" +
-        OPTIONS.map(o => `┃ 〔 ${o.n} 〕 ${o.label}`).join("\n") + "\n" +
-        "┃\n" +
-        "┣━━━━━━━━━━━━━━━━━━━\n" +
-        `┃ ↪ Reply with ${OPTIONS.map(o => o.n).join(", ")}\n` +
         `┃ 🆔 ${id}\n` +
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n" +
         `⚡ ${FOOTER} 👨‍💻`;
 
-    try {
-        await sock.sendMessage(jid, { image: { url: v.thumb }, caption }, { quoted: msg });
-    } catch {
-        await sock.sendMessage(jid, { text: caption }, { quoted: msg });
-    }
-
+    let card;
+    try { card = await sock.sendMessage(jid, { image: { url: v.thumb }, caption }, { quoted: msg }); }
+    catch { card = await sock.sendMessage(jid, { text: caption }, { quoted: msg }); }
+    if (typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
+        await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, jid, "💠 Choose how to receive this media", [
+            { id: `shan_yt_${id}_video`, text: "🎬 Video 1080p" },
+            { id: `shan_yt_${id}_audio`, text: "🎧 Audio" },
+            { id: `shan_yt_${id}_document`, text: "📁 Document" }
+        ], { quoted: card || msg });
+    } else { await sock.sendMessage(jid, { text: "🎬 Video 1080p\n🎧 Audio\n📁 Document" }, { quoted: msg }); }
     return true;
 }
 
@@ -390,27 +412,25 @@ async function sendChosen(sock, msg, entry, opt) {
     let buffer;
 
     try {
-        buffer = await fetchVideoBuffer(entry.videoId, opt.h);
+        buffer = opt.audio ? await fetchAudioBuffer(entry.videoId) : await fetchVideoBuffer(entry.videoId, 1080);
     } catch (error) {
         const text =
             error?.code === "TOO_LARGE"
                 ? `❌ Video eka ${MAX_MB}MB wada loku. Podi quality ekak (480p / 360p) select karanna.`
-                : "❌ Video eka download karanna bari una. Passe aye try karanna, nathnam wena quality ekak select karanna.";
+                : "❌ Media eka download karanna bari una. Passe aye try karanna.";
 
         await sock.sendMessage(jid, { text }, { quoted: msg });
         return false;
     }
 
     const safe = entry.title.replace(/[\\/:*?"<>|\n\r]/g, "").slice(0, 80) || "video";
-    const caption = `🎬 ${entry.title}\n📺 ${opt.h}p\n\n⚡ ${FOOTER}`;
+    const caption = `${opt.audio ? "🎧" : "🎬"} ${entry.title}\n${opt.audio ? "Audio" : "1080p"}\n\n⚡ ${FOOTER}`;
 
     try {
-        if (opt.doc) {
-            await sock.sendMessage(
-                jid,
-                { document: buffer, mimetype: "video/mp4", fileName: `${safe}.mp4`, caption },
-                { quoted: msg }
-            );
+        if (opt.audio) {
+            await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg", fileName: `${safe}.mp3` }, { quoted: msg });
+        } else if (opt.doc) {
+            await sock.sendMessage(jid, { document: buffer, mimetype: "video/mp4", fileName: `${safe}.mp4`, caption }, { quoted: msg });
         } else {
             await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption }, { quoted: msg });
         }
@@ -491,25 +511,15 @@ export default {
     // true = handled, false = ignore
     async handleReply(sock, msg, text) {
         try {
+            const input = String(text || "").trim();
+            const picked = input.match(/^shan_yt_([a-z0-9]{4,8})_(video|audio|document)$/i);
             const quoted = quotedTextOf(msg);
-
-            if (!quoted.includes(MARKER)) return false;
-
+            if (!picked && !quoted.includes(MARKER)) return false;
             const jid = getJid(msg);
-            const id = (quoted.match(/🆔\s*([a-z0-9]{4,8})/i) || [])[1];
-            const opt = OPTIONS.find(o => o.n === Number(String(text || "").trim()));
-
-            if (!opt) {
-                await sock.sendMessage(
-                    jid,
-                    { text: `🔢 ${OPTIONS.map(o => o.n).join(", ")} walin ekak reply karanna.` },
-                    { quoted: msg }
-                );
-                return true;
-            }
-
+            const id = picked?.[1] || (quoted.match(/🆔\s*([a-z0-9]{4,8})/i) || [])[1];
+            const opt = picked ? OPTIONS.find(o => o.key === picked[2].toLowerCase()) : OPTIONS.find(o => o.key === input.toLowerCase());
+            if (!opt) return false;
             sweep();
-
             const entry = id ? cache.get(id) : null;
 
             if (!entry) {
