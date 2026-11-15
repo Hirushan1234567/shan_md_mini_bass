@@ -16,7 +16,7 @@ const FOOTER = "POWERED BY SHAN MINI BOT";
 
 const MAX_MB = Number(process.env.YT_MAX_MB || 90);
 const MAX_MINUTES = Number(process.env.YT_MAX_MIN || 60);
-const MARKER = "SELECT VIDEO QUALITY";
+const MARKER = "SELECT DOWNLOAD FORMAT";
 const CACHE_TIME = 10 * 60 * 1000;
 
 const OPTIONS = [
@@ -387,7 +387,7 @@ async function sendCard(sock, msg, base) {
         `┃ 📅 Released  : ${v.published || "N/A"}\n` +
         `┃ ⏱️ Duration  : ${fmtDur(v.duration)}\n` +
         "┣━━━━━━━━━━━━━━━━━━━\n" +
-        "┃ 💎 SELECT DOWNLOAD FORMAT\n" +
+        `┃ 💎 ${MARKER}\n` +
         "┃\n" +
         `┃ 🆔 ${id}\n` +
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n" +
@@ -396,13 +396,17 @@ async function sendCard(sock, msg, base) {
     let card;
     try { card = await sock.sendMessage(jid, { image: { url: v.thumb }, caption }, { quoted: msg }); }
     catch { card = await sock.sendMessage(jid, { text: caption }, { quoted: msg }); }
-    if (typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
+    const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+    const buttonsEnabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+    if (buttonsEnabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
         await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, jid, "💠 Choose how to receive this media", [
             { id: `shan_yt_${id}_video`, text: "🎬 Video 1080p" },
             { id: `shan_yt_${id}_audio`, text: "🎧 Audio" },
             { id: `shan_yt_${id}_document`, text: "📁 Document" }
         ], { quoted: card || msg });
-    } else { await sock.sendMessage(jid, { text: "🎬 Video 1080p\n🎧 Audio\n📁 Document" }, { quoted: msg }); }
+    } else {
+        await sock.sendMessage(jid, { text: "🎬 Reply *video* for 1080p\n🎧 Reply *audio*\n📁 Reply *document*" }, { quoted: card || msg });
+    }
     return true;
 }
 
@@ -416,7 +420,7 @@ async function sendChosen(sock, msg, entry, opt) {
     } catch (error) {
         const text =
             error?.code === "TOO_LARGE"
-                ? `❌ Video eka ${MAX_MB}MB wada loku. Podi quality ekak (480p / 360p) select karanna.`
+                ? `❌ Video eka ${MAX_MB}MB limit eka wada loku. Me video eka deliver karanna bari una.`
                 : "❌ Media eka download karanna bari una. Passe aye try karanna.";
 
         await sock.sendMessage(jid, { text }, { quoted: msg });
@@ -453,7 +457,7 @@ export default {
     command: "yt",
     alias: ["ytv", "ytvideo", "ytmp4", "video", "vid"],
     category: "DOWNLOAD",
-    description: "Download YouTube videos (720p / 480p / 360p / document)",
+    description: "Download YouTube video 1080p, audio or document",
     usage: ".yt <name | link>",
     replyHandler: true,
 
