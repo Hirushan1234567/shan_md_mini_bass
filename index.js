@@ -145,36 +145,9 @@ function installFooter(sock, subNumber = null) {
       }
     }
 
-    // Native Flow is optional: if WhatsApp rejects it, always fall back
-    // to the original Baileys text send so plugin replies are not lost.
-    const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
-    const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
-
-    if (
-      enabled &&
-      typeof content?.text === "string" &&
-      !content.buttons &&
-      !content.templateButtons &&
-      !content.sections &&
-      !content.interactiveMessage &&
-      !content.edit &&
-      !content.react &&
-      !content.delete &&
-      !content.forward
-    ) {
-      try {
-        const body = content.text;
-        const quoted = options?.quoted;
-        return await sendShanNativeButtons(sock, jid, body, [
-          { id: "shan_btn_menu", text: "📋 Menu" },
-          { id: "shan_btn_ping", text: "🏓 Ping" },
-          { id: "shan_btn_owner", text: "👑 Owner" }
-        ], { quoted });
-      } catch (error) {
-        console.error("[SHAN BUTTONS] Native Flow send failed; falling back to text:", error?.message || error);
-      }
-    }
-
+    // Button Mode is handled explicitly by menu.js. Do not convert every
+    // plugin text reply into Native Flow: some plugins send progress, edits,
+    // media captions, or multiple messages and must retain normal Baileys sends.
     return orig(jid, content, options);
   };
 }
