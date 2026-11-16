@@ -2020,7 +2020,7 @@ function setupMessages(sock, ctx = {}) {
                 `╭━━〔 🔘 BUTTON MODE 〕━━╮\n\n` +
                 `✅ Button Mode: ${enabled ? "ON" : "OFF"}\n\n` +
                 (enabled
-                  ? "📋 List Menu / All Menu සහ plugin text replies සඳහා buttons සක්‍රියයි."
+                  ? "📋 Menu, category සහ command selection buttons සක්‍රියයි."
                   : "📝 සාමාන්‍ය text mode එක සක්‍රියයි.") +
                 ""
             },
