@@ -75,22 +75,12 @@ async function sendShanNativeButtons(sock, jid, text, buttons, options = {}) {
     })
   });
 
-  // WhatsApp Native Flow messages must be wrapped in viewOnceMessage.
-  // Sending interactiveMessage as a top-level message can return from the
-  // plugin without rendering the buttons in WhatsApp.
+  // Native Flow messages must be sent as a direct interactiveMessage.
+  // Wrapping them in viewOnceMessage can prevent WhatsApp from rendering
+  // the native buttons on supported clients.
   const waMessage = generateWAMessageFromContent(
     jid,
-    {
-      viewOnceMessage: {
-        message: {
-          messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2
-          },
-          interactiveMessage
-        }
-      }
-    },
+    { interactiveMessage },
     { userJid: sock.user?.id, quoted: options.quoted }
   );
 
