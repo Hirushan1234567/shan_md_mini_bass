@@ -20,6 +20,8 @@
     "axios": "latest",
     "jsqr": "latest",
     "bwip-js": "latest",
-    "rss-parser": "latest"
+    "rss-parser": "latest",
+    "adm-zip": "^0.5.16",
+    "wa-sticker-formatter": "^4.4.4"
   }
 }
