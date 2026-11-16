@@ -118,59 +118,62 @@ function installFooter(sock, subNumber = null) {
 
   const orig = sock.sendMessage.bind(sock);
 
-  sock.sendMessage = (jid, content, options) => {
-    try {
-      const j = String(jid || "");
+  sock.sendMessage = async (jid, content, options) => {
+    const j = String(jid || "");
 
-      const skip =
-        !content ||
-        typeof content !== "object" ||
-        content.react ||
-        content.delete ||
-        content.edit ||
-        content.forward ||
-        j.endsWith("@newsletter") ||
-        j === "status@broadcast";
+    const skip =
+      !content ||
+      typeof content !== "object" ||
+      content.react ||
+      content.delete ||
+      content.edit ||
+      content.forward ||
+      j.endsWith("@newsletter") ||
+      j === "status@broadcast";
 
-      if (!skip) {
-        if (
-          typeof content.text === "string" &&
-          !content.text.includes(DEPLOY_LINK)
-        ) {
-          content = { ...content, text: content.text + FOOTER };
-        } else if (
-          typeof content.caption === "string" &&
-          !content.caption.includes(DEPLOY_LINK)
-        ) {
-          content = { ...content, caption: content.caption + FOOTER };
-        }
-      }
-
-      // Modern WhatsApp Native Flow quick replies for ordinary text replies.
-      const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
-      const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
-
+    if (!skip) {
       if (
-        enabled &&
-        typeof content?.text === "string" &&
-        !content.buttons &&
-        !content.templateButtons &&
-        !content.sections &&
-        !content.interactiveMessage &&
-        !content.edit &&
-        !content.react &&
-        !content.delete &&
-        !content.forward
+        typeof content.text === "string" &&
+        !content.text.includes(DEPLOY_LINK)
       ) {
+        content = { ...content, text: content.text + FOOTER };
+      } else if (
+        typeof content.caption === "string" &&
+        !content.caption.includes(DEPLOY_LINK)
+      ) {
+        content = { ...content, caption: content.caption + FOOTER };
+      }
+    }
+
+    // Native Flow is optional: if WhatsApp rejects it, always fall back
+    // to the original Baileys text send so plugin replies are not lost.
+    const botKey = subNumber ? cleanNumber(subNumber) || "sub" : "main";
+    const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
+
+    if (
+      enabled &&
+      typeof content?.text === "string" &&
+      !content.buttons &&
+      !content.templateButtons &&
+      !content.sections &&
+      !content.interactiveMessage &&
+      !content.edit &&
+      !content.react &&
+      !content.delete &&
+      !content.forward
+    ) {
+      try {
         const body = content.text;
         const quoted = options?.quoted;
-        return sendShanNativeButtons(sock, jid, body, [
+        return await sendShanNativeButtons(sock, jid, body, [
           { id: "shan_btn_menu", text: "📋 Menu" },
           { id: "shan_btn_ping", text: "🏓 Ping" },
           { id: "shan_btn_owner", text: "👑 Owner" }
         ], { quoted });
+      } catch (error) {
+        console.error("[SHAN BUTTONS] Native Flow send failed; falling back to text:", error?.message || error);
       }
-    } catch {}
+    }
 
     return orig(jid, content, options);
   };
