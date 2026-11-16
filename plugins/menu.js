@@ -489,44 +489,100 @@ function cleanupCache() {
    SEND MENU
 ===================================================== */
 
-async function sendCategoryList(sock, msg) {
+async function sendNativeSelect(sock, msg, text, title, sections) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
-  const rows = CATEGORIES.map(category => ({ title: `${category.icon} ${category.name}`, rowId: `shan_category_${category.id}`, description: category.description }));
-  rows.push({ title: "📚 ALL COMMANDS", rowId: "shan_category_all", description: "Browse every command" });
+  const sendButtons = globalThis.SHAN_SEND_NATIVE_BUTTONS;
+  if (typeof sendButtons !== "function") {
+    throw new Error("Native button sender is unavailable");
+  }
+  return sendButtons(sock, jid, text, [{
+    name: "single_select",
+    params: { title, sections }
+  }], { quoted: msg });
+}
+
+async function sendCategoryList(sock, msg) {
+  const rows = CATEGORIES.map(category => ({
+    title: `${category.icon} ${category.name}`,
+    id: `shan_category_${category.id}`,
+    description: category.description
+  }));
+  rows.push({
+    title: "📚 ALL COMMANDS",
+    id: "shan_category_all",
+    description: "Browse every command"
+  });
   const sections = [];
-  for (let i = 0; i < rows.length; i += 10) sections.push({ title: i === 0 ? "📂 CATEGORIES" : "📂 MORE CATEGORIES", rows: rows.slice(i, i + 10) });
-  const sent = await sock.sendMessage(jid, { text: "💠 SHAN MINI BOT — Select a category", title: "LIST MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT CATEGORY", sections }, { quoted: msg });
-  if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "categories" }); }
-  return sent;
+  for (let i = 0; i < rows.length; i += 10) {
+    sections.push({
+      title: i === 0 ? "📂 CATEGORIES" : "📂 MORE CATEGORIES",
+      rows: rows.slice(i, i + 10)
+    });
+  }
+  return sendNativeSelect(
+    sock, msg, "💠 SHAN MINI BOT — Select a category",
+    "SELECT CATEGORY", sections
+  );
 }
 
 async function sendAllCommandList(sock, msg) {
-  const jid = msg.key?.remoteJid || msg.remoteJid, prefix = getPrefix(), allRows = [];
+  const prefix = getPrefix();
+  const allRows = [];
   for (const category of CATEGORIES) {
-    const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
-    for (const [command, description] of items) allRows.push({ title: `${category.icon} ${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description: `${category.name} • ${description}` });
+    const items = category.id === "premium"
+      ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"])
+      : category.items;
+    for (const [command, description] of items) {
+      allRows.push({
+        title: `${category.icon} ${prefix}${command}`,
+        id: `${prefix}${command.split(/\\s+/)[0]}`,
+        description: `${category.name} • ${description}`
+      });
+    }
   }
   const sections = [];
-  for (let i = 0; i < allRows.length; i += 10) sections.push({ title: `ALL COMMANDS ${Math.floor(i / 10) + 1}`, rows: allRows.slice(i, i + 10) });
-  return sock.sendMessage(jid, { text: "📚 SHAN MINI BOT — All commands", title: "ALL MENU", footer: "BLUE NEON • SHAN MINI BOT", buttonText: "SELECT COMMAND", sections }, { quoted: msg });
+  for (let i = 0; i < allRows.length; i += 10) {
+    sections.push({
+      title: `ALL COMMANDS ${Math.floor(i / 10) + 1}`,
+      rows: allRows.slice(i, i + 10)
+    });
+  }
+  return sendNativeSelect(
+    sock, msg, "📚 SHAN MINI BOT — All commands",
+    "SELECT COMMAND", sections
+  );
 }
 
 async function sendMenu(sock, msg, text) {
   const jid = msg.key?.remoteJid || msg.remoteJid;
-  const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
+  const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\\D/g, "") || "sub" : "main";
   const enabled = globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true;
   if (enabled && typeof globalThis.SHAN_SEND_NATIVE_BUTTONS === "function") {
     const sent = await globalThis.SHAN_SEND_NATIVE_BUTTONS(sock, jid, "💠 SHAN MINI BOT — Choose a menu", [
-      { id: "shan_menu_list", text: "☰ List Menu" }, { id: "shan_menu_all", text: "📚 All Menu" }
+      { id: "shan_menu_list", text: "☰ List Menu" },
+      { id: "shan_menu_all", text: "📚 All Menu" }
     ], { quoted: msg });
-    if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" }); }
+    if (sent?.key?.id) {
+      cleanupCache();
+      MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" });
+    }
     return sent;
   }
-  const logoPath = path.join(process.cwd(), "logo.jpg"), image = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
+  const logoPath = path.join(process.cwd(), "logo.jpg");
+  const image = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
   let sent;
-  try { sent = image ? await sock.sendMessage(jid, { image, caption: text }, { quoted: msg }) : await sock.sendMessage(jid, { text }, { quoted: msg }); }
-  catch (error) { console.error("[MENU] Menu image send failed:", error?.message || error); sent = await sock.sendMessage(jid, { text }, { quoted: msg }); }
-  if (sent?.key?.id) { cleanupCache(); MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" }); }
+  try {
+    sent = image
+      ? await sock.sendMessage(jid, { image, caption: text }, { quoted: msg })
+      : await sock.sendMessage(jid, { text }, { quoted: msg });
+  } catch (error) {
+    console.error("[MENU] Menu image send failed:", error?.message || error);
+    sent = await sock.sendMessage(jid, { text }, { quoted: msg });
+  }
+  if (sent?.key?.id) {
+    cleanupCache();
+    MENU_CACHE.set(sent.key.id, { time: Date.now(), jid, kind: "main" });
+  }
   return sent;
 }
 
