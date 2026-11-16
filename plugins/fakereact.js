@@ -2,8 +2,10 @@
 // Channel management: auto-react, auto-follow, link, emoji pack
 // Premium-only (owner exempt) — gating handled by index.js executePlugin
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CONFIG_FILE = path.join(__dirname, "..", "channelAutoReact.json");
 
@@ -203,4 +205,15 @@ const handleMessage = async (sock, msg) => {
   }
 };
 
-module.exports = { command, handleMessage, commands: ["chnal.link", "chnal.react", "chfallow", "chnal.emoji"] };
+export default {
+  name: "channel-tools",
+  command: "chnal.link",
+  commands: ["chnal.link", "chnal.react", "chfallow", "chnal.emoji"],
+  category: "channels",
+  description: "WhatsApp channel tools",
+  async execute(sock, msg, args, commandName) {
+    const fullText = [commandName || "chnal.link", ...(Array.isArray(args) ? args : [])].join(" ");
+    return command(sock, msg, fullText);
+  },
+  handleMessage
+};
