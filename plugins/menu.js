@@ -605,20 +605,20 @@ async function handleReply(sock, msg, text) {
   if (input === "shan_menu_list") { await sendCategoryList(sock, msg); return true; }
   if (input === "shan_menu_all") { await sendAllCommandList(sock, msg); return true; }
   if (input === "shan_category_more") {
-    const jid = msg.key?.remoteJid || msg.remoteJid;
     const rows = CATEGORIES.slice(9).map(category => ({
       title: `${category.icon} ${category.name}`,
-      rowId: `shan_category_${category.id}`,
+      id: `shan_category_${category.id}`,
       description: category.description
     }));
-    rows.push({ title: "📋 All commands", rowId: "shan_category_all", description: "Show every command" });
-    await sock.sendMessage(jid, {
-      text: "💠 SHAN MINI BOT — More categories",
-      title: "More categories",
-      footer: "💠 Blue Neon Edition",
-      buttonText: "⚡ Select category",
-      sections: [{ title: "📚 Select a category", rows }]
-    }, { quoted: msg });
+    rows.push({
+      title: "📋 All commands",
+      id: "shan_category_all",
+      description: "Show every command"
+    });
+    await sendNativeSelect(
+      sock, msg, "💠 SHAN MINI BOT — More categories",
+      "MORE CATEGORIES", [{ title: "📚 SELECT A CATEGORY", rows }]
+    );
     return true;
   }
 
@@ -633,13 +633,28 @@ async function handleReply(sock, msg, text) {
       const botKey = msg?.__shanSub ? String(msg.__shanSub).replace(/\D/g, "") || "sub" : "main";
       if (globalThis.SHAN_BUTTON_MODE_CACHE?.get(botKey) === true) {
         const prefix = getPrefix();
-        const items = category.id === "premium" ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"]) : category.items;
-        const rows = items.map(([command, description]) => ({ title: `${prefix}${command}`, rowId: `${prefix}${command.split(/\s+/)[0]}`, description }));
+        const items = category.id === "premium"
+          ? (await getPremiumOnlyCommands()).map(command => [command, "Premium-only command"])
+          : category.items;
+        const rows = items.map(([command, description]) => ({
+          title: `${prefix}${command}`,
+          id: `${prefix}${command.split(/\\s+/)[0]}`,
+          description
+        }));
         const sections = [];
-        for (let i = 0; i < rows.length; i += 10) sections.push({ title: i === 0 ? "AVAILABLE COMMANDS" : "MORE COMMANDS", rows: rows.slice(i, i + 10) });
-        const sent = await sock.sendMessage(msg.key?.remoteJid || msg.remoteJid, { text: `${category.icon} ${category.name} — Select a command`, title: "COMMANDS", footer: "SHAN MINI BOT • BLUE NEON", buttonText: "SELECT COMMAND", sections }, { quoted: msg });
-        if (sent?.key?.id) MENU_CACHE.set(sent.key.id, { time: Date.now(), jid: msg.key?.remoteJid || msg.remoteJid, kind: "commands" });
-      } else { await sendMenu(sock, msg, await buildCategory(category)); }
+        for (let i = 0; i < rows.length; i += 10) {
+          sections.push({
+            title: i === 0 ? "AVAILABLE COMMANDS" : "MORE COMMANDS",
+            rows: rows.slice(i, i + 10)
+          });
+        }
+        await sendNativeSelect(
+          sock, msg, `${category.icon} ${category.name} — Select a command`,
+          "SELECT COMMAND", sections
+        );
+      } else {
+        await sendMenu(sock, msg, await buildCategory(category));
+      }
       return true;
     }
   }
