@@ -54,11 +54,13 @@ globalThis.SHAN_CONTACTS = new Map(); // botKey -> Set(jid)
 // converted to native-flow by the pinned Baileys 6.7.24 package.
 async function sendShanNativeButtons(sock, jid, text, buttons, options = {}) {
   const nativeButtons = buttons.map(button => ({
-    name: "quick_reply",
-    buttonParamsJson: JSON.stringify({
-      display_text: button.text,
-      id: button.id
-    })
+    name: button.name || "quick_reply",
+    buttonParamsJson: JSON.stringify(
+      button.params || {
+        display_text: button.text,
+        id: button.id
+      }
+    )
   }));
 
   const interactiveMessage = proto.Message.InteractiveMessage.create({
